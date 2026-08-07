@@ -1,0 +1,560 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cartoon Hoops 1v1 - Stickman Pro</title>
+    <style>
+        :root {
+            --primary: #9370db; 
+            --primary-dark: #663399;
+            --secondary: #2b5cff; 
+            --secondary-dark: #1a3ab5;
+            --text: #ffffff;
+            --bg-dark: #121220;
+            --gold: #ffd700;
+        }
+        body, html {
+            margin: 0; padding: 0; width: 100%; height: 100%;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: var(--bg-dark); color: var(--text); overflow: hidden;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: scale(0.95); }
+            to { opacity: 1; transform: scale(1); }
+        }
+        .screen {
+            display: none; width: 100%; height: 100%;
+            background: linear-gradient(135deg, var(--bg-dark) 0%, var(--primary-dark) 100%);
+            flex-direction: column; align-items: center; justify-content: center;
+            position: absolute; top: 0; left: 0;
+        }
+        .screen.active { display: flex; animation: fadeIn 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
+        
+        h1, h2 { text-shadow: 3px 3px 6px rgba(0,0,0,0.6); letter-spacing: 2px; margin-top: 0; }
+        h1 { color: var(--gold); font-size: 3em; }
+        
+        .menu-box {
+            background: rgba(20, 20, 40, 0.85); padding: 40px; border-radius: 20px; 
+            border: 4px solid var(--secondary); box-shadow: 0 15px 35px rgba(0,0,0,0.5), inset 0 0 20px rgba(43, 92, 255, 0.3);
+            text-align: center; width: 85%; max-width: 550px; backdrop-filter: blur(10px);
+        }
+        
+        input[type="text"] {
+            padding: 15px; width: 80%; margin-bottom: 25px; border-radius: 10px; border: 2px solid var(--primary); 
+            background: rgba(255,255,255,0.1); color: white; font-size: 18px; outline: none; transition: 0.3s;
+        }
+        input[type="text"]:focus { border-color: var(--gold); background: rgba(255,255,255,0.2); }
+        
+        button {
+            background: linear-gradient(to bottom, var(--secondary), var(--secondary-dark)); 
+            color: white; border: 2px solid #5a7fff; padding: 15px 30px; margin: 10px;
+            border-radius: 12px; font-size: 18px; cursor: pointer; transition: all 0.2s ease-in-out; font-weight: 900; width: 85%;
+            text-transform: uppercase; letter-spacing: 1px; box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+        }
+        button:hover { transform: translateY(-3px) scale(1.02); box-shadow: 0 8px 25px rgba(43, 92, 255, 0.6); border-color: white; }
+        button:active { transform: translateY(2px); box-shadow: none; }
+        
+        .top-bar {
+            position: absolute; top: 0; left: 0; width: 100%; padding: 15px 30px; background: rgba(0,0,0,0.75);
+            display: flex; justify-content: space-between; box-sizing: border-box; font-weight: bold; font-size: 20px; z-index: 10;
+            border-bottom: 3px solid var(--primary); box-shadow: 0 4px 10px rgba(0,0,0,0.5);
+        }
+        .top-bar .highlight { color: var(--gold); }
+        
+        .controls-panel {
+            position: absolute; bottom: 20px; right: 20px;
+            background: rgba(0, 0, 0, 0.7); border: 2px solid var(--secondary);
+            padding: 15px 25px; border-radius: 12px; font-size: 14px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.5); text-align: left;
+        }
+        .controls-panel h3 { margin: 0 0 10px 0; color: var(--gold); text-align: center; font-size: 16px;}
+        .controls-panel ul { list-style: none; padding: 0; margin: 0; }
+        .controls-panel li { margin-bottom: 5px; }
+        .controls-panel span { font-weight: bold; color: #4da6ff; }
+
+        #game-container { position: relative; width: 900px; height: 550px; margin: auto; display: none; }
+        canvas { background: #222; border: 6px solid var(--secondary); border-radius: 12px; box-shadow: 0 0 40px rgba(0,0,0,0.8); position: relative; z-index: 1; }
+        
+        #scoreboard {
+            position: absolute; top: 15px; left: 50%; transform: translateX(-50%);
+            background: rgba(18, 18, 32, 0.9); color: white; padding: 10px 30px;
+            border-radius: 12px; font-size: 32px; font-weight: 900; border: 3px solid var(--primary); display: flex; gap: 40px;
+            z-index: 100;
+        }
+        
+        .back-btn { background: #444; border-color: #666; width: auto; font-size: 14px; padding: 10px 20px; }
+        .back-btn:hover { background: #555; border-color: #888; }
+        .stats-list p { display: flex; justify-content: space-between; align-items: center; background: rgba(0,0,0,0.3); padding: 10px 20px; border-radius: 8px; font-weight: bold; }
+        .upgrade-btn { width: auto; padding: 8px 15px; margin: 0; font-size: 14px; }
+        .gacha-result { font-size: 28px; color: var(--gold); font-weight: 900; margin-top: 20px; min-height: 40px; text-shadow: 0 0 10px rgba(255,215,0,0.5); }
+        .loading-text { animation: pulse 1s infinite; color: #aaa; }
+        @keyframes pulse { 0% { opacity: 0.5; } 50% { opacity: 1; } 100% { opacity: 0.5; } }
+        
+        #shot-meter-container {
+            position: absolute; bottom: -30px; left: 50%; transform: translateX(-50%);
+            width: 300px; height: 25px; background: rgba(0,0,0,0.8); border: 3px solid white; border-radius: 15px; overflow: hidden; display: none; z-index: 100;
+        }
+        #shot-sweet-spot { position: absolute; left: 40%; width: 20%; height: 100%; background: rgba(0, 255, 0, 0.4); z-index: 1; }
+        #shot-fill { position: absolute; top: 0; left: 0; height: 100%; width: 0%; background: linear-gradient(90deg, red, yellow, lime, yellow, red); z-index: 2; }
+    </style>
+</head>
+<body>
+
+    <div id="login-screen" class="screen active">
+        <div class="menu-box">
+            <h1>HOOPS 1v1</h1>
+            <input type="text" id="username-input" placeholder="Enter your Baller Name..." autocomplete="off">
+            <button onclick="login()">Hit the Court</button>
+        </div>
+    </div>
+
+    <div id="main-menu" class="screen">
+        <div class="top-bar">
+            <span><span id="display-name">Player</span> 🏀</span>
+            <span>Coins: <span id="display-coins" class="highlight">0</span> | BP Lvl: <span id="display-bp" class="highlight">1</span></span>
+        </div>
+        <div class="menu-box">
+            <h2>MAIN MENU</h2>
+            <button onclick="nav('career-screen')">Career Mode 🏆</button>
+            <button onclick="startMatch('quick')">Quick Match ⚡</button>
+            <button onclick="nav('upgrade-screen')">Player Upgrades 💪</button>
+            <button onclick="nav('store-screen')">Card Store 🃏</button>
+            <button onclick="nav('bp-screen')">Battle Pass ⭐</button>
+        </div>
+        
+        <div class="controls-panel">
+            <h3>🎮 HOW TO PLAY</h3>
+            <ul>
+                <li><span>A / D</span> - Move Left / Right</li>
+                <li><span>SPACE</span> - Jump</li>
+                <li><span>SHIFT (Hold & Release)</span> - Shoot</li>
+                <li><span>SHIFT (Double Tap close to hoop)</span> - Dunk</li>
+                <li><span>W</span> - Dash Forward</li>
+                <li><span>S</span> - Steal Ball</li>
+                <li><span>B</span> - Block Shot</li>
+            </ul>
+        </div>
+    </div>
+
+    <div id="upgrade-screen" class="screen">
+        <div class="top-bar">
+            <span>Upgrades</span><span>Coins: <span id="upg-coins" class="highlight">0</span></span>
+        </div>
+        <div class="menu-box">
+            <h2>Enhance Your Player</h2>
+            <div class="stats-list">
+                <p>Speed (Lvl <span id="lvl-speed">1</span>) <button class="upgrade-btn" onclick="upgrade('speed')">50 Coins</button></p>
+                <p>Jump (Lvl <span id="lvl-jump">1</span>) <button class="upgrade-btn" onclick="upgrade('jump')">50 Coins</button></p>
+                <p>Accuracy (Lvl <span id="lvl-acc">1</span>) <button class="upgrade-btn" onclick="upgrade('acc')">50 Coins</button></p>
+            </div>
+            <button class="back-btn" onclick="nav('main-menu')">Back to Menu</button>
+        </div>
+    </div>
+
+    <div id="store-screen" class="screen">
+        <div class="top-bar">
+            <span>Card Store</span><span>Coins: <span id="store-coins" class="highlight">0</span></span>
+        </div>
+        <div class="menu-box">
+            <h2>Open Packs</h2>
+            <p style="color:#ddd;">1 Packet = 50 Coins. Test your luck!</p>
+            <button onclick="openPacket()" id="open-pack-btn">Tear Open Packet</button>
+            <div class="gacha-result" id="gacha-msg"></div>
+            <button class="back-btn" onclick="nav('main-menu')">Back to Menu</button>
+        </div>
+    </div>
+
+    <div id="bp-screen" class="screen">
+        <div class="menu-box">
+            <h2>Battle Pass Progress</h2>
+            <div style="background: rgba(0,0,0,0.5); padding: 20px; border-radius: 10px; margin-bottom: 20px;">
+                <h1 style="margin:0;">Tier <span id="bp-level-ui">1</span></h1>
+                <p style="font-size: 20px; margin-top:10px;">XP: <span id="bp-xp-ui" class="highlight">0</span> / 100</p>
+                <div style="width: 100%; background: #333; height: 15px; border-radius: 8px; margin-top: 10px;">
+                    <div id="bp-progress-bar" style="width: 0%; background: var(--gold); height: 100%; border-radius: 8px; transition: 0.3s;"></div>
+                </div>
+            </div>
+            <p>Level up for random coin rewards! Win = 100XP, Loss = 50XP.</p>
+            <button class="back-btn" onclick="nav('main-menu')">Back to Menu</button>
+        </div>
+    </div>
+
+    <div id="career-screen" class="screen">
+        <div class="menu-box">
+            <h2>NBA Journey</h2>
+            <h3 style="color:var(--gold);">Season Progress: <span id="career-wins">0</span> Wins</h3>
+            <p id="career-status" style="font-size: 18px;">Win 5 regular games to reach the Finals.</p>
+            <button onclick="startMatch('career')">Play Next Match</button>
+            <button class="back-btn" onclick="nav('main-menu')">Back to Menu</button>
+        </div>
+    </div>
+
+    <div id="game-screen" class="screen">
+        <div id="game-container">
+            <div id="scoreboard">
+                <span id="score-p1" style="color: #4da6ff;">0</span>
+                <span id="time-display" style="color: var(--gold);">2:00</span>
+                <span id="score-p2" style="color: #ff4d4d;">0</span>
+            </div>
+            <canvas id="gameCanvas" width="900" height="550"></canvas>
+            <div id="shot-meter-container"><div id="shot-sweet-spot"></div><div id="shot-fill"></div></div>
+        </div>
+    </div>
+
+    <script>
+        const courtImg = new Image(); courtImg.src = 'image_7033d5.jpg';
+
+        let player = { name: "Baller", coins: 150, xp: 0, bpLevel: 1, stats: { speed: 1, jump: 1, accuracy: 1 }, careerWins: 0, inFinals: false, finalsGame: 1 };
+        let gameState = { mode: '', active: false, resetTimer: 0, ballToAI: false };
+
+        function nav(screenId) { document.querySelectorAll('.screen').forEach(s => s.classList.remove('active')); document.getElementById(screenId).classList.add('active'); updateUI(); }
+        function login() { let name = document.getElementById('username-input').value; if(name.trim() !== "") player.name = name; nav('main-menu'); }
+        
+        function updateUI() {
+            document.getElementById('display-name').innerText = player.name;
+            document.getElementById('display-coins').innerText = player.coins;
+            document.getElementById('display-bp').innerText = player.bpLevel;
+            document.getElementById('upg-coins').innerText = player.coins;
+            document.getElementById('store-coins').innerText = player.coins;
+            document.getElementById('lvl-speed').innerText = player.stats.speed;
+            document.getElementById('lvl-jump').innerText = player.stats.jump;
+            document.getElementById('lvl-acc').innerText = player.stats.accuracy;
+            document.getElementById('bp-level-ui').innerText = player.bpLevel;
+            document.getElementById('bp-xp-ui').innerText = player.xp;
+            document.getElementById('bp-progress-bar').style.width = player.xp + '%';
+            let cStatus = player.inFinals ? `🔥 NBA FINALS - Game ${player.finalsGame} / 5 🔥` : `Need ${5 - player.careerWins} wins to reach Finals`;
+            document.getElementById('career-wins').innerText = player.careerWins;
+            document.getElementById('career-status').innerText = cStatus;
+        }
+
+        function upgrade(stat) { let cost = 50 * player.stats[stat]; if(player.coins >= cost) { player.coins -= cost; player.stats[stat]++; updateUI(); } else { alert("Not enough coins!"); } }
+        
+        function openPacket() {
+            if(player.coins < 50) { document.getElementById('gacha-msg').innerText = "Not enough coins!"; return; }
+            player.coins -= 50; updateUI();
+            let btn = document.getElementById('open-pack-btn'); let msg = document.getElementById('gacha-msg');
+            btn.disabled = true; msg.innerHTML = '<span class="loading-text">Opening...</span>';
+            setTimeout(() => {
+                let roll = Math.random() * 100, reward = 0;
+                if(roll <= 40) reward = 30; else if(roll <= 60) reward = 40; else if(roll <= 80) reward = 60; else if(roll <= 90) reward = 100;
+                else if(roll <= 95) reward = 150; else if(roll <= 98) reward = 200; else reward = 1000;
+                player.coins += reward; msg.innerHTML = `🎉 You won <span style="color:white;">${reward}</span> coins! 🎉`;
+                btn.disabled = false; updateUI();
+            }, 1000);
+        }
+
+        function addXP(amount) {
+            player.xp += amount;
+            while(player.xp >= 100 && player.bpLevel < 200) {
+                player.xp -= 100; player.bpLevel++; let reward = Math.floor(Math.random() * 451) + 50; player.coins += reward;
+                setTimeout(() => alert(`⭐ BATTLE PASS LEVEL UP! ⭐\nTier ${player.bpLevel} reached. You got ${reward} coins!`), 500);
+            }
+            updateUI();
+        }
+
+        const canvas = document.getElementById('gameCanvas'); const ctx = canvas.getContext('2d');
+        let timerInterval, timeRemaining = 120, p1Score = 0, p2Score = 0;
+        let keys = {}; window.addEventListener('keydown', e => keys[e.code] = true); window.addEventListener('keyup', e => keys[e.code] = false);
+        let p1, ai, ball, particles = [];
+        let shotCharge = 0, isShooting = false, chargeDir = 1, p1DashCooldown = 0, lastShiftPress = 0, shakeFrames = 0;
+
+        function startMatch(mode) {
+            gameState.mode = mode; document.getElementById('game-container').style.display = 'block'; nav('game-screen');
+            timeRemaining = 120; p1Score = 0; p2Score = 0; particles = []; updateScoreboard();
+
+            // Calculate AI Difficulty based on career progression
+            let aiLevel = 1;
+            if (mode === 'career') { aiLevel = player.inFinals ? (4 + player.finalsGame) : (1 + player.careerWins); } 
+            else { aiLevel = 2; } // Quick match default is easy-medium
+            
+            let aiSpeed = 1.0 + (aiLevel * 0.15); // Starts very slow
+            let aiJump = -11 - (aiLevel * 0.4); // Starts with weak jump
+
+            p1 = { x: 250, y: 450, w: 50, h: 80, vx: 0, vy: 0, speed: 1.5 + (player.stats.speed * 0.2), jump: -14 - (player.stats.jump * 0.5), grounded: false, hasBall: true, color: '#4da6ff', isShooting: false, facing: 1 };
+            ai = { x: 650, y: 450, w: 50, h: 80, vx: 0, vy: 0, speed: aiSpeed, jump: aiJump, grounded: false, hasBall: false, color: '#ff4d4d', isShooting: false, facing: -1, level: aiLevel };
+            ball = { x: 250, y: 450, r: 14, vx: 0, vy: 0, active: false, rot: 0 };
+
+            gameState.active = true;
+            gameState.resetTimer = 180; // Triggers a 3 second countdown when game starts
+            gameState.ballToAI = false;
+            resetPositions(false);
+
+            clearInterval(timerInterval);
+            timerInterval = setInterval(() => {
+                if(!gameState.active || gameState.resetTimer > 0) return; // Pauses clock during cooldowns
+                
+                if (timeRemaining > 0) { timeRemaining--; updateScoreboard(); }
+                if(p1DashCooldown > 0) p1DashCooldown--;
+                
+                // Allow buzzer beaters if time runs out but ball is in the air
+                if(timeRemaining <= 0 && !ball.active) { endGame(); }
+            }, 1000);
+            
+            requestAnimationFrame(update);
+        }
+
+        function updateScoreboard() {
+            let mins = Math.floor(Math.max(0, timeRemaining) / 60); let secs = Math.max(0, timeRemaining) % 60;
+            document.getElementById('time-display').innerText = `${mins}:${secs < 10 ? '0' : ''}${secs}`;
+            document.getElementById('score-p1').innerText = p1Score; document.getElementById('score-p2').innerText = p2Score;
+        }
+
+        function spawnText(text, x, y, color) { particles.push({ text: text, x: x, y: y, life: 60, color: color, vy: -2 }); }
+
+        function drawStickman(p) {
+            const time = Date.now() / 100;
+            const isRunning = Math.abs(p.vx) > 0.5 && p.grounded;
+            
+            let legSwing = isRunning ? Math.sin(time * p.speed) * 45 : 0;
+            if (!p.grounded) legSwing = -20; 
+            let armSwing = isRunning ? -Math.sin(time * p.speed) * 40 : 0;
+            
+            const headR = 14; const headY = p.y - p.h + headR; const neckY = headY + headR; const hipY = p.y - 25;
+            
+            ctx.strokeStyle = p.color; ctx.fillStyle = p.color; ctx.lineWidth = 6; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+
+            ctx.beginPath(); ctx.arc(p.x, headY, headR, 0, Math.PI * 2); ctx.fill();
+            ctx.beginPath(); ctx.moveTo(p.x, neckY); ctx.lineTo(p.x, hipY);
+
+            ctx.moveTo(p.x, hipY); ctx.lineTo(p.x + Math.sin(legSwing * Math.PI / 180) * 25, hipY + Math.cos(legSwing * Math.PI / 180) * 25);
+            ctx.moveTo(p.x, hipY); ctx.lineTo(p.x + Math.sin(-legSwing * Math.PI / 180) * 25, hipY + Math.cos(-legSwing * Math.PI / 180) * 25);
+
+            const shoulderY = neckY + 10;
+            if (p.isShooting) {
+                ctx.moveTo(p.x, shoulderY); ctx.lineTo(p.x + (20 * p.facing), shoulderY - 30);
+            } else if (p.hasBall) {
+                ctx.moveTo(p.x, shoulderY); ctx.lineTo(p.x + (15 * p.facing), shoulderY + 20);
+            } else {
+                ctx.moveTo(p.x, shoulderY); ctx.lineTo(p.x + Math.sin(armSwing * Math.PI / 180) * 20, shoulderY + Math.cos(armSwing * Math.PI / 180) * 20);
+                ctx.moveTo(p.x, shoulderY); ctx.lineTo(p.x + Math.sin(-armSwing * Math.PI / 180) * 20, shoulderY + Math.cos(-armSwing * Math.PI / 180) * 20);
+            }
+            ctx.stroke();
+        }
+
+        function update() {
+            if(!gameState.active) return;
+            
+            if (shakeFrames > 0) { canvas.style.transform = `translate(${Math.random()*10-5}px, ${Math.random()*10-5}px)`; shakeFrames--; } 
+            else { canvas.style.transform = `translate(0, 0)`; }
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            if(courtImg.complete && courtImg.naturalWidth !== 0) {
+                ctx.drawImage(courtImg, 0, 0, canvas.width, canvas.height);
+                ctx.fillStyle = 'rgba(0,0,0,0.4)'; ctx.fillRect(0,0, canvas.width, canvas.height);
+            } else {
+                ctx.fillStyle = '#222'; ctx.fillRect(0,0, canvas.width, canvas.height);
+                ctx.fillStyle = '#d4a373'; ctx.fillRect(0, 450, canvas.width, 100);
+            }
+
+            const floorY = 450; const gravity = 0.7; const friction = 0.85;
+
+            // Physics Update (Always runs so players/ball land smoothly)
+            p1.vy += gravity; p1.y += p1.vy; p1.x += p1.vx; p1.vx *= friction;
+            ai.vy += gravity; ai.y += ai.vy; ai.x += ai.vx; ai.vx *= friction;
+            
+            if(p1.y >= floorY) { p1.y = floorY; p1.vy = 0; p1.grounded = true; }
+            if(ai.y >= floorY) { ai.y = floorY; ai.vy = 0; ai.grounded = true; }
+            if(p1.x < 25) { p1.x = 25; p1.vx = 0; } if(p1.x > 875) { p1.x = 875; p1.vx = 0; }
+            if(ai.x < 25) { ai.x = 25; ai.vx = 0; } if(ai.x > 875) { ai.x = 875; ai.vx = 0; }
+
+            // Split Gameplay Logic vs Cooldown logic
+            if (gameState.resetTimer > 0) {
+                gameState.resetTimer--;
+                
+                // Triggers immediately when countdown has 2 secs left (gives ball 1s to fall from net naturally)
+                if (gameState.resetTimer === 120) { resetPositions(gameState.ballToAI); }
+                
+                p1.facing = p1.hasBall ? 1 : (ball.x > p1.x ? 1 : -1);
+                ai.facing = ai.hasBall ? -1 : (ball.x < ai.x ? -1 : 1);
+
+            } else {
+                // Controls & States
+                p1.facing = (ball.x > p1.x || p1.hasBall) ? 1 : -1;
+                ai.facing = (ball.x < ai.x || ai.hasBall) ? -1 : 1;
+                p1.isShooting = keys['ShiftLeft'] && p1.hasBall;
+
+                if(keys['KeyD']) p1.vx += p1.speed;
+                if(keys['KeyA']) p1.vx -= p1.speed;
+                if(keys['Space'] && p1.grounded) { p1.vy = p1.jump; p1.grounded = false; }
+                
+                if(keys['KeyW'] && p1DashCooldown === 0) {
+                    p1.vx = keys['KeyA'] ? -25 : 25; p1DashCooldown = 3; keys['KeyW'] = false; spawnText("DASH!", p1.x, p1.y - 60, "white");
+                }
+                if(keys['KeyS'] && !p1.hasBall && ai.hasBall && Math.abs(p1.x - ai.x) < 70) {
+                    ai.hasBall = false; p1.hasBall = true; spawnText("STEAL!", p1.x, p1.y - 60, "yellow");
+                }
+                if(keys['KeyB'] && !p1.grounded && ball.active && ball.vy < 0 && Math.abs(p1.x - ball.x) < 70 && Math.abs(p1.y - ball.y) < 70) {
+                    ball.vx *= -1; ball.vy = 5; spawnText("BLOCKED!", p1.x, p1.y - 50, "red");
+                }
+
+                // Shooting Mechanics
+                let meterUi = document.getElementById('shot-meter-container'); let fillUi = document.getElementById('shot-fill');
+                if(keys['ShiftLeft'] && p1.hasBall) {
+                    isShooting = true; meterUi.style.display = 'block'; shotCharge += 3 * chargeDir;
+                    if(shotCharge > 100) { shotCharge = 100; chargeDir = -1; } if(shotCharge < 0) { shotCharge = 0; chargeDir = 1; }
+                    fillUi.style.width = shotCharge + '%';
+                } else if (!keys['ShiftLeft'] && isShooting) {
+                    isShooting = false; meterUi.style.display = 'none'; p1.hasBall = false; ball.active = true;
+                    ball.x = p1.x + 20; ball.y = p1.y - 60;
+                    
+                    let now = Date.now();
+                    if(now - lastShiftPress < 300 && p1.x > 750 && !p1.grounded) {
+                        ball.vx = 4; ball.vy = 12; shakeFrames = 15; spawnText("SLAM DUNK!", p1.x, p1.y - 80, "orange");
+                    } else {
+                        let accuracy = 1 - (Math.abs(50 - shotCharge) / 50); 
+                        if(accuracy > 0.9) spawnText("GREEN!", p1.x, p1.y - 50, "lime");
+                        accuracy += (player.stats.accuracy * 0.08); 
+                        ball.vx = 10; ball.vy = -15 * Math.max(0.5, accuracy);
+                    }
+                    shotCharge = 0; lastShiftPress = now;
+                }
+
+                // Scaling AI Intelligence
+                if(ai.hasBall) {
+                    let shootDist = 200 + ((10 - ai.level) * 15);
+                    if(ai.x > shootDist) ai.vx -= ai.speed * 0.5;
+                    else if (ai.grounded) {
+                        ai.hasBall = false; ball.active = true; ai.isShooting = true;
+                        ball.x = ai.x - 20; ball.y = ai.y - 60; ball.vx = -9; ball.vy = -14; 
+                        setTimeout(() => ai.isShooting = false, 500);
+                    }
+                } else {
+                    if(ball.active) {
+                        if(ai.x < ball.x - 20) ai.vx += ai.speed * 0.6; 
+                        if(ai.x > ball.x + 20) ai.vx -= ai.speed * 0.6;
+                        // AI only jumps to block on easier settings if the ball is extremely close
+                        if(ball.y < ai.y - (80 + (10 - ai.level)*15) && ai.grounded && Math.abs(ai.x - ball.x) < (30 + ai.level*5)) ai.vy = ai.jump; 
+                    } else if(p1.hasBall) { 
+                        if(ai.x > p1.x + 150) ai.vx -= ai.speed * 0.5; 
+                        else if (ai.x < p1.x + 80) ai.vx += ai.speed * 0.5; 
+                    }
+                }
+            }
+
+            // Ball Physics & Scoring Detect (Always runs to make ball falling look natural)
+            if(p1.hasBall) {
+                ball.x = p1.x + (p1.facing * 20); 
+                ball.y = p1.y + (Math.abs(Math.cos(Date.now() / 150)) * 25) - 10; ball.rot += 0.1;
+            } else if (ai.hasBall) {
+                ball.x = ai.x + (ai.facing * 20);
+                ball.y = ai.y + (Math.abs(Math.cos(Date.now() / 150)) * 25) - 10; ball.rot -= 0.1;
+            } else if (ball.active) {
+                ball.vy += gravity; ball.x += ball.vx; ball.y += ball.vy; ball.rot += ball.vx * 0.05;
+
+                if(ball.x - ball.r < 0) { ball.x = ball.r; ball.vx *= -0.8; }
+                if(ball.x + ball.r > canvas.width) { ball.x = canvas.width - ball.r; ball.vx *= -0.8; }
+                if(ball.y >= floorY + 15) { ball.y = floorY + 15; ball.vy *= -0.7; ball.vx *= 0.8; }
+                
+                // Pick up ball mechanics (blocked during cooldown)
+                if(ball.y > floorY - 50 && ball.vy > 0 && gameState.resetTimer <= 0) {
+                    if(Math.abs(p1.x - ball.x) < 50) { p1.hasBall = true; ball.active = false; }
+                    else if(Math.abs(ai.x - ball.x) < 50) { ai.hasBall = true; ball.active = false; }
+                }
+
+                // Check for goals (blocked during cooldown to prevent double scoring)
+                if (gameState.resetTimer <= 0) {
+                    if(ball.x > 820 && ball.x < 880 && ball.y > 240 && ball.y < 280 && ball.vy > 0) { scorePoints('p1', p1.x < 450 ? 3 : 2); }
+                    if(ball.x > 20 && ball.x < 80 && ball.y > 240 && ball.y < 280 && ball.vy > 0) { scorePoints('ai', ai.x > 450 ? 3 : 2); }
+                }
+            }
+
+            // Draw Court Elements
+            ctx.strokeStyle = 'rgba(255,255,255,0.5)'; ctx.lineWidth = 3;
+            ctx.beginPath(); ctx.moveTo(450, 0); ctx.lineTo(450, 550); ctx.stroke();
+            ctx.beginPath(); ctx.arc(450, 450, 200, 0, Math.PI, true); ctx.stroke();
+
+            ctx.fillStyle = 'rgba(255,255,255,0.2)'; ctx.fillRect(10, 180, 10, 100); ctx.fillRect(880, 180, 10, 100); 
+            ctx.fillStyle = '#ff5500'; ctx.fillRect(20, 250, 60, 8); ctx.fillRect(820, 250, 60, 8); 
+
+            // Draw Stickmen Players
+            drawStickman(p1);
+            drawStickman(ai);
+
+            // Draw Ball
+            ctx.save();
+            ctx.translate(ball.x, ball.y); ctx.rotate(ball.rot);
+            ctx.fillStyle = '#ff7b00';
+            ctx.beginPath(); ctx.arc(0, 0, ball.r, 0, Math.PI * 2); ctx.fill();
+            ctx.strokeStyle = '#000'; ctx.lineWidth = 1.5;
+            ctx.beginPath(); ctx.moveTo(-ball.r, 0); ctx.lineTo(ball.r, 0); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(0, -ball.r); ctx.lineTo(0, ball.r); ctx.stroke();
+            ctx.restore();
+
+            // Draw Timer Countdown Overlay
+            if (gameState.resetTimer > 0 && gameState.resetTimer <= 120) {
+                let count = Math.ceil(gameState.resetTimer / 60);
+                if (count > 0) {
+                    ctx.fillStyle = "rgba(0,0,0,0.4)";
+                    ctx.fillRect(0,0,canvas.width,canvas.height);
+                    
+                    ctx.fillStyle = "var(--gold)";
+                    ctx.font = "bold 120px Arial";
+                    ctx.textAlign = "center";
+                    ctx.textBaseline = "middle";
+                    ctx.fillText(count, canvas.width/2, canvas.height/2);
+                    ctx.strokeStyle = "white";
+                    ctx.lineWidth = 4;
+                    ctx.strokeText(count, canvas.width/2, canvas.height/2);
+                    ctx.textBaseline = "alphabetic"; // Reset
+                }
+            }
+
+            for(let i = particles.length - 1; i >= 0; i--) {
+                let p = particles[i]; ctx.fillStyle = p.color; ctx.font = "bold 24px Arial"; ctx.textAlign = "center";
+                ctx.globalAlpha = p.life / 60; ctx.fillText(p.text, p.x, p.y); p.y += p.vy; p.life--;
+                if(p.life <= 0) particles.splice(i, 1);
+            }
+            ctx.globalAlpha = 1.0;
+
+            requestAnimationFrame(update);
+        }
+
+        function scorePoints(team, pts) {
+            let isBuzzer = timeRemaining <= 0;
+            if(isBuzzer) { pts = 5; spawnText("BUZZER BEATER! +5", 450, 200, "gold"); shakeFrames = 20; }
+            else { spawnText(`SWISH! +${pts}`, team === 'p1' ? 850 : 50, 200, "white"); }
+            
+            if(team === 'p1') p1Score += pts; else p2Score += pts; 
+            updateScoreboard();
+
+            // Set 3 second timer (60 frames per second * 3)
+            gameState.resetTimer = 180; 
+            gameState.ballToAI = (team === 'p1'); // Give ball to the team that was scored on
+        }
+
+        function resetPositions(giveBallToAI) { 
+            p1.x = 250; p1.y = 450; p1.vx = 0; p1.isShooting = false; p1.hasBall = !giveBallToAI;
+            ai.x = 650; ai.y = 450; ai.vx = 0; ai.isShooting = false; ai.hasBall = giveBallToAI;
+            ball.active = false; shotCharge = 0; isShooting = false; 
+            document.getElementById('shot-meter-container').style.display = 'none';
+        }
+
+        function endGame() {
+            gameState.active = false; clearInterval(timerInterval);
+            document.getElementById('game-container').style.display = 'none'; document.getElementById('shot-meter-container').style.display = 'none';
+            let won = p1Score > p2Score; let msg = won ? `VICTORY! ${p1Score} - ${p2Score}` : `DEFEAT! ${p1Score} - ${p2Score}`;
+            
+            if (p1Score === p2Score) { msg = `TIE GAME! ${p1Score} - ${p2Score}`; player.coins += 5; addXP(75); }
+            else if(won) { player.coins += 10; addXP(100); } 
+            else { player.coins += 5; addXP(50); }
+
+            if(gameState.mode === 'career' && p1Score !== p2Score) {
+                if(player.inFinals) {
+                    if(won) {
+                        player.finalsGame++;
+                        if(player.finalsGame > 5) { alert(msg + "\n🏆 YOU WON THE NBA FINALS! 🏆"); player.careerWins = 0; player.inFinals = false; player.finalsGame = 1; } 
+                        else { alert(msg + `\nAdvancing to Finals Game ${player.finalsGame}!`); }
+                    } else { alert(msg + "\nEliminated in the Finals! Season Over."); player.careerWins = 0; player.inFinals = false; player.finalsGame = 1; }
+                } else {
+                    if(won) { player.careerWins++;
+                        if(player.careerWins >= 5) { player.inFinals = true; player.finalsGame = 1; alert(msg + "\n🔥 CONGRATULATIONS! You reached the NBA Finals! 🔥"); } 
+                        else { alert(msg + `\nSeason Wins: ${player.careerWins} / 5`); }
+                    } else { alert(msg + "\nBrush it off, hit the court again."); }
+                }
+            } else { alert(msg); }
+            nav('main-menu');
+        }
+    </script>
+</body>
+</html>
