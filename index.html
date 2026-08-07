@@ -43,8 +43,7 @@
         
         input[type="text"] {
             padding: 15px; width: 80%; margin-bottom: 25px; border-radius: 10px; border: 2px solid var(--primary); 
-            background: rgba(255,255,255,0.1); color: white; font-size: 18px; outline: none; transition: 0.3s;
-            text-align: center;
+            background: rgba(255,255,255,0.1); color: white; font-size: 18px; outline: none; transition: 0.3s; text-align: center;
         }
         input[type="text"]:focus { border-color: var(--gold); background: rgba(255,255,255,0.2); }
         
@@ -99,6 +98,11 @@
         }
         #shot-sweet-spot { position: absolute; left: 40%; width: 20%; height: 100%; background: rgba(0, 255, 0, 0.4); z-index: 1; }
         #shot-fill { position: absolute; top: 0; left: 0; height: 100%; width: 0%; background: linear-gradient(90deg, red, yellow, lime, yellow, red); z-index: 2; }
+        
+        .room-code-box {
+            font-size: 36px; font-weight: 900; color: var(--gold); letter-spacing: 5px; background: rgba(0,0,0,0.4);
+            padding: 15px; border-radius: 10px; border: 2px dashed var(--gold); margin: 15px 0;
+        }
     </style>
 </head>
 <body>
@@ -118,9 +122,9 @@
         </div>
         <div class="menu-box">
             <h2>MAIN MENU</h2>
+            <button onclick="nav('multiplayer-screen')">Multiplayer 🌐</button>
             <button onclick="nav('career-screen')">Career Mode 🏆</button>
             <button onclick="startMatch('quick')">Quick Match ⚡</button>
-            <button onclick="nav('multiplayer-screen')">Online 1v1 🌐</button>
             <button onclick="nav('upgrade-screen')">Player Upgrades 💪</button>
             <button onclick="nav('store-screen')">Card Store 🃏</button>
             <button onclick="nav('bp-screen')">Battle Pass ⭐</button>
@@ -142,22 +146,24 @@
 
     <div id="multiplayer-screen" class="screen">
         <div class="menu-box">
-            <h2>ONLINE MULTIPLAYER 🌐</h2>
-            
-            <div id="mp-lobby-selection">
-                <button onclick="hostRoom()">Host Game (Create Code)</button>
-                <div style="margin: 20px 0; border-bottom: 1px solid rgba(255,255,255,0.2);"></div>
-                <input type="text" id="join-code-input" placeholder="ENTER 6-DIGIT CODE" style="text-transform: uppercase;">
-                <button onclick="joinRoom()">Join Game</button>
+            <h2>1v1 ONLINE MULTIPLAYER</h2>
+            <button onclick="createRoom()">Create Room 🏠</button>
+            <div style="margin: 20px 0; border-top: 1px solid #444; position: relative;">
+                <span style="position: absolute; top: -12px; left: 50%; transform: translateX(-50%); background: #141428; padding: 0 10px; color: #888;">OR</span>
             </div>
+            <input type="text" id="join-code-input" placeholder="Enter 4-Digit Code" maxlength="4" style="text-transform: uppercase;">
+            <button onclick="joinRoom()">Join Room 🚀</button>
+            <button class="back-btn" onclick="nav('main-menu')">Back to Menu</button>
+        </div>
+    </div>
 
-            <div id="mp-waiting-room" style="display: none; margin-top: 20px;">
-                <p>Share this Room Code with a friend:</p>
-                <h1 id="room-code-display" style="color: var(--gold); letter-spacing: 5px;">------</h1>
-                <p class="loading-text">Waiting for opponent to join...</p>
-            </div>
-
-            <button class="back-btn" onclick="leaveLobby(); nav('main-menu')">Back to Menu</button>
+    <div id="lobby-screen" class="screen">
+        <div class="menu-box">
+            <h2>ROOM LOBBY</h2>
+            <p>Share this code with your friend:</p>
+            <div id="room-code-display" class="room-code-box">----</div>
+            <p id="lobby-status" class="loading-text">Waiting for opponent to join...</p>
+            <button class="back-btn" onclick="leaveRoom()">Cancel & Leave</button>
         </div>
     </div>
 
@@ -227,17 +233,24 @@
     </div>
 
     <script>
+        // --- SUPABASE MULTIPLAYER SETUP ---
+        const SUPABASE_URL = 'https://qtrkhbteealvshknhbra.supabase.co';
+        const SUPABASE_KEY = 'sb_publishable_EbWZ7cYFsGtKiZOdUbyjsw_opDfzUe7';
+        
+        let supabaseClient = null;
+        if (window.supabase && typeof window.supabase.createClient === 'function') {
+            supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+        }
+
+        let mp = {
+            channel: null,
+            roomCode: '',
+            isHost: false,
+            p2Keys: {},
+            connected: false
+        };
+
         const courtImg = new Image(); courtImg.src = 'image_7033d5.jpg';
-
-        // --- SUPABASE INITIALIZATION ---
-        const SUPABASE_URL = "https://qtrkhbteealvshknhbra.supabase.co";
-        const SUPABASE_KEY = "sb_publishable_EbWZ7cYFsGtKiZOdUbyjsw_opDfzUe7";
-        const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-
-        let roomChannel = null;
-        let isHost = false;
-        let isMultiplayer = false;
-        let currentRoomCode = "";
 
         let player = { name: "Baller", coins: 150, xp: 0, bpLevel: 1, stats: { speed: 1, jump: 1, accuracy: 1 }, careerWins: 0, inFinals: false, finalsGame: 1 };
         let gameState = { mode: '', active: false, resetTimer: 0, ballToAI: false };
@@ -260,6 +273,74 @@
             let cStatus = player.inFinals ? `🔥 NBA FINALS - Game ${player.finalsGame} / 5 🔥` : `Need ${5 - player.careerWins} wins to reach Finals`;
             document.getElementById('career-wins').innerText = player.careerWins;
             document.getElementById('career-status').innerText = cStatus;
+        }
+
+        // --- MULTIPLAYER ROOM LOGIC ---
+        function createRoom() {
+            if (!supabaseClient) { alert("Multiplayer client is initializing. Please try again."); return; }
+            mp.isHost = true;
+            mp.roomCode = Math.floor(1000 + Math.random() * 9000).toString();
+            document.getElementById('room-code-display').innerText = mp.roomCode;
+            document.getElementById('lobby-status').innerText = "Waiting for opponent to join...";
+            nav('lobby-screen');
+            setupChannel(mp.roomCode);
+        }
+
+        function joinRoom() {
+            if (!supabaseClient) { alert("Multiplayer client is initializing. Please try again."); return; }
+            let code = document.getElementById('join-code-input').value.trim();
+            if(code.length !== 4) { alert("Please enter a valid 4-digit code"); return; }
+            mp.isHost = false;
+            mp.roomCode = code;
+            document.getElementById('room-code-display').innerText = code;
+            document.getElementById('lobby-status').innerText = "Connecting to room...";
+            nav('lobby-screen');
+            setupChannel(code);
+        }
+
+        function leaveRoom() {
+            if(mp.channel && supabaseClient) supabaseClient.removeChannel(mp.channel);
+            mp.channel = null;
+            mp.connected = false;
+            nav('multiplayer-screen');
+        }
+
+        function setupChannel(code) {
+            if(mp.channel && supabaseClient) supabaseClient.removeChannel(mp.channel);
+            mp.channel = supabaseClient.channel(`hoops_room_${code}`, { config: { broadcast: { self: false } } });
+
+            mp.channel
+                .on('broadcast', { event: 'join' }, payload => {
+                    if (mp.isHost) {
+                        mp.connected = true;
+                        mp.channel.send({ type: 'broadcast', event: 'start_game', payload: {} });
+                        startMatch('multiplayer');
+                    }
+                })
+                .on('broadcast', { event: 'start_game' }, payload => {
+                    if (!mp.isHost) {
+                        mp.connected = true;
+                        startMatch('multiplayer');
+                    }
+                })
+                .on('broadcast', { event: 'inputs' }, payload => {
+                    if (mp.isHost) mp.p2Keys = payload.keys;
+                })
+                .on('broadcast', { event: 'sync' }, payload => {
+                    if (!mp.isHost && gameState.active) {
+                        p1.x = payload.p1.x; p1.y = payload.p1.y; p1.vx = payload.p1.vx; p1.vy = payload.p1.vy; p1.facing = payload.p1.facing; p1.hasBall = payload.p1.hasBall;
+                        ai.x = payload.p2.x; ai.y = payload.p2.y; ai.vx = payload.p2.vx; ai.vy = payload.p2.vy; ai.facing = payload.p2.facing; ai.hasBall = payload.p2.hasBall;
+                        ball.x = payload.ball.x; ball.y = payload.ball.y; ball.rot = payload.ball.rot; ball.active = payload.ball.active;
+                        p1Score = payload.p1Score; p2Score = payload.p2Score; timeRemaining = payload.timeRemaining;
+                        gameState.resetTimer = payload.resetTimer;
+                        updateScoreboard();
+                    }
+                })
+                .subscribe((status) => {
+                    if (status === 'SUBSCRIBED' && !mp.isHost) {
+                        mp.channel.send({ type: 'broadcast', event: 'join', payload: {} });
+                    }
+                });
         }
 
         function upgrade(stat) { let cost = 50 * player.stats[stat]; if(player.coins >= cost) { player.coins -= cost; player.stats[stat]++; updateUI(); } else { alert("Not enough coins!"); } }
@@ -287,542 +368,22 @@
             updateUI();
         }
 
-        // --- MULTIPLAYER ROOM HANDLERS ---
-        function generateRoomCode() {
-            return Math.random().toString(36).substring(2, 8).toUpperCase();
-        }
-
-        function hostRoom() {
-            currentRoomCode = generateRoomCode();
-            isHost = true;
-            isMultiplayer = true;
-
-            document.getElementById('mp-lobby-selection').style.display = 'none';
-            document.getElementById('mp-waiting-room').style.display = 'block';
-            document.getElementById('room-code-display').innerText = currentRoomCode;
-
-            subscribeToRoom(currentRoomCode);
-        }
-
-        function joinRoom() {
-            const code = document.getElementById('join-code-input').value.trim().toUpperCase();
-            if (code.length < 4) {
-                alert("Please enter a valid room code.");
-                return;
-            }
-            
-            currentRoomCode = code;
-            isHost = false;
-            isMultiplayer = true;
-
-            subscribeToRoom(currentRoomCode);
-        }
-
-        function subscribeToRoom(code) {
-            roomChannel = supabaseClient.channel(`room_${code}`, {
-                config: { broadcast: { self: false } }
-            });
-
-            roomChannel
-                .on('broadcast', { event: 'player_joined' }, () => {
-                    if (isHost) {
-                        roomChannel.send({ type: 'broadcast', event: 'start_game', payload: {} });
-                        startOnlineMatch();
-                    }
-                })
-                .on('broadcast', { event: 'start_game' }, () => {
-                    if (!isHost) {
-                        startOnlineMatch();
-                    }
-                })
-                .on('broadcast', { event: 'game_state' }, (payload) => {
-                    if (!isHost && gameState.active) {
-                        syncGameStateFromHost(payload.payload);
-                    }
-                })
-                .on('broadcast', { event: 'client_input' }, (payload) => {
-                    if (isHost && gameState.active) {
-                        applyGuestInputToAI(payload.payload);
-                    }
-                })
-                .subscribe((status) => {
-                    if (status === 'SUBSCRIBED') {
-                        if (!isHost) {
-                            roomChannel.send({ type: 'broadcast', event: 'player_joined', payload: {} });
-                        }
-                    }
-                });
-        }
-
-        function startOnlineMatch() {
-            document.getElementById('mp-waiting-room').style.display = 'none';
-            document.getElementById('mp-lobby-selection').style.display = 'block';
-            
-            startMatch('multiplayer');
-            ai.color = '#ff4d4d'; 
-        }
-
-        function leaveLobby() {
-            if (roomChannel) {
-                supabaseClient.removeChannel(roomChannel);
-                roomChannel = null;
-            }
-            isMultiplayer = false;
-            isHost = false;
-        }
-
         const canvas = document.getElementById('gameCanvas'); const ctx = canvas.getContext('2d');
         let timerInterval, timeRemaining = 120, p1Score = 0, p2Score = 0;
-        let keys = {}; window.addEventListener('keydown', e => keys[e.code] = true); window.addEventListener('keyup', e => keys[e.code] = false);
+        let keys = {}; 
+        window.addEventListener('keydown', e => { keys[e.code] = true; sendInputs(); }); 
+        window.addEventListener('keyup', e => { keys[e.code] = false; sendInputs(); });
+
+        function sendInputs() {
+            if (gameState.mode === 'multiplayer' && !mp.isHost && mp.channel) {
+                mp.channel.send({ type: 'broadcast', event: 'inputs', payload: { keys } });
+            }
+        }
+
         let p1, ai, ball, particles = [];
         let shotCharge = 0, isShooting = false, chargeDir = 1, p1DashCooldown = 0, lastShiftPress = 0, shakeFrames = 0;
+        let p2ShotCharge = 0, p2IsShooting = false, p2ChargeDir = 1, p2DashCooldown = 0, p2LastShiftPress = 0;
 
         function startMatch(mode) {
             gameState.mode = mode; document.getElementById('game-container').style.display = 'block'; nav('game-screen');
-            timeRemaining = 120; p1Score = 0; p2Score = 0; particles = []; updateScoreboard();
-
-            let aiLevel = 1;
-            if (mode === 'career') { aiLevel = player.inFinals ? (4 + player.finalsGame) : (1 + player.careerWins); } 
-            else { aiLevel = 2; }
-            
-            let aiSpeed = 1.0 + (aiLevel * 0.15);
-            let aiJump = -11 - (aiLevel * 0.4);
-
-            p1 = { x: 250, y: 450, w: 50, h: 80, vx: 0, vy: 0, speed: 1.5 + (player.stats.speed * 0.2), jump: -14 - (player.stats.jump * 0.5), grounded: false, hasBall: true, color: '#4da6ff', isShooting: false, facing: 1 };
-            ai = { 
-                x: 650, y: 450, w: 50, h: 80, vx: 0, vy: 0, speed: aiSpeed, jump: aiJump, grounded: false, 
-                hasBall: false, color: '#ff4d4d', isShooting: false, facing: -1, level: aiLevel,
-                actionTimer: 0, currentAction: 'NORMAL', targetX: 650
-            };
-            ball = { x: 250, y: 450, r: 14, vx: 0, vy: 0, active: false, rot: 0 };
-
-            gameState.active = true;
-            gameState.resetTimer = 180;
-            gameState.ballToAI = false;
-            resetPositions(false);
-
-            clearInterval(timerInterval);
-            timerInterval = setInterval(() => {
-                if(!gameState.active || gameState.resetTimer > 0) return;
-                
-                if (timeRemaining > 0) { timeRemaining--; updateScoreboard(); }
-                if(p1DashCooldown > 0) p1DashCooldown--;
-                
-                if(timeRemaining <= 0 && !ball.active) { endGame(); }
-            }, 1000);
-            
-            requestAnimationFrame(update);
-        }
-
-        function updateScoreboard() {
-            let mins = Math.floor(Math.max(0, timeRemaining) / 60); let secs = Math.max(0, timeRemaining) % 60;
-            document.getElementById('time-display').innerText = `${mins}:${secs < 10 ? '0' : ''}${secs}`;
-            document.getElementById('score-p1').innerText = p1Score; document.getElementById('score-p2').innerText = p2Score;
-        }
-
-        function spawnText(text, x, y, color) { particles.push({ text: text, x: x, y: y, life: 60, color: color, vy: -2 }); }
-
-        function drawStickman(p) {
-            const time = Date.now() / 100;
-            const isRunning = Math.abs(p.vx) > 0.5 && p.grounded;
-            
-            let legSwing = isRunning ? Math.sin(time * p.speed) * 45 : 0;
-            if (!p.grounded) legSwing = -20; 
-            let armSwing = isRunning ? -Math.sin(time * p.speed) * 40 : 0;
-            
-            const headR = 14; const headY = p.y - p.h + headR; const neckY = headY + headR; const hipY = p.y - 25;
-            
-            ctx.strokeStyle = p.color; ctx.fillStyle = p.color; ctx.lineWidth = 6; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-
-            ctx.beginPath(); ctx.arc(p.x, headY, headR, 0, Math.PI * 2); ctx.fill();
-            ctx.beginPath(); ctx.moveTo(p.x, neckY); ctx.lineTo(p.x, hipY);
-
-            ctx.moveTo(p.x, hipY); ctx.lineTo(p.x + Math.sin(legSwing * Math.PI / 180) * 25, hipY + Math.cos(legSwing * Math.PI / 180) * 25);
-            ctx.moveTo(p.x, hipY); ctx.lineTo(p.x + Math.sin(-legSwing * Math.PI / 180) * 25, hipY + Math.cos(-legSwing * Math.PI / 180) * 25);
-
-            const shoulderY = neckY + 10;
-            if (p.isShooting) {
-                ctx.moveTo(p.x, shoulderY); ctx.lineTo(p.x + (20 * p.facing), shoulderY - 30);
-            } else if (p.hasBall) {
-                ctx.moveTo(p.x, shoulderY); ctx.lineTo(p.x + (15 * p.facing), shoulderY + 20);
-            } else {
-                ctx.moveTo(p.x, shoulderY); ctx.lineTo(p.x + Math.sin(armSwing * Math.PI / 180) * 20, shoulderY + Math.cos(armSwing * Math.PI / 180) * 20);
-                ctx.moveTo(p.x, shoulderY); ctx.lineTo(p.x + Math.sin(-armSwing * Math.PI / 180) * 20, shoulderY + Math.cos(-armSwing * Math.PI / 180) * 20);
-            }
-            ctx.stroke();
-        }
-
-        function update() {
-            if(!gameState.active) return;
-
-            // MULTIPLAYER BROADCAST ENGINE
-            if (isMultiplayer) {
-                if (isHost) {
-                    if (roomChannel && gameState.active) {
-                        roomChannel.send({
-                            type: 'broadcast',
-                            event: 'game_state',
-                            payload: {
-                                p1: { x: p1.x, y: p1.y, vx: p1.vx, vy: p1.vy, hasBall: p1.hasBall, isShooting: p1.isShooting },
-                                p2: { x: ai.x, y: ai.y, vx: ai.vx, vy: ai.vy, hasBall: ai.hasBall, isShooting: ai.isShooting },
-                                ball: { x: ball.x, y: ball.y, vx: ball.vx, vy: ball.vy, active: ball.active, rot: ball.rot },
-                                score: { p1: p1Score, p2: p2Score },
-                                time: timeRemaining
-                            }
-                        });
-                    }
-                } else {
-                    if (roomChannel && gameState.active) {
-                        roomChannel.send({
-                            type: 'broadcast',
-                            event: 'client_input',
-                            payload: {
-                                left: keys['KeyA'],
-                                right: keys['KeyD'],
-                                jump: keys['Space'],
-                                shoot: keys['ShiftLeft'],
-                                steal: keys['KeyS']
-                            }
-                        });
-                    }
-                }
-            }
-            
-            if (shakeFrames > 0) { canvas.style.transform = `translate(${Math.random()*10-5}px, ${Math.random()*10-5}px)`; shakeFrames--; } 
-            else { canvas.style.transform = `translate(0, 0)`; }
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-            if(courtImg.complete && courtImg.naturalWidth !== 0) {
-                ctx.drawImage(courtImg, 0, 0, canvas.width, canvas.height);
-                ctx.fillStyle = 'rgba(0,0,0,0.4)'; ctx.fillRect(0,0, canvas.width, canvas.height);
-            } else {
-                ctx.fillStyle = '#222'; ctx.fillRect(0,0, canvas.width, canvas.height);
-                ctx.fillStyle = '#d4a373'; ctx.fillRect(0, 450, canvas.width, 100);
-            }
-
-            const floorY = 450; const gravity = 0.7; const friction = 0.85;
-
-            // Physics Update
-            p1.vy += gravity; p1.y += p1.vy; p1.x += p1.vx; p1.vx *= friction;
-            ai.vy += gravity; ai.y += ai.vy; ai.x += ai.vx; ai.vx *= friction;
-            
-            if(p1.y >= floorY) { p1.y = floorY; p1.vy = 0; p1.grounded = true; }
-            if(ai.y >= floorY) { ai.y = floorY; ai.vy = 0; ai.grounded = true; }
-            if(p1.x < 25) { p1.x = 25; p1.vx = 0; } if(p1.x > 875) { p1.x = 875; p1.vx = 0; }
-            if(ai.x < 25) { ai.x = 25; ai.vx = 0; } if(ai.x > 875) { ai.x = 875; ai.vx = 0; }
-
-            if (gameState.resetTimer > 0) {
-                gameState.resetTimer--;
-                if (gameState.resetTimer === 120) { resetPositions(gameState.ballToAI); }
-                p1.facing = p1.hasBall ? 1 : (ball.x > p1.x ? 1 : -1);
-                ai.facing = ai.hasBall ? -1 : (ball.x < ai.x ? -1 : 1);
-
-            } else {
-                p1.facing = (ball.x > p1.x || p1.hasBall) ? 1 : -1;
-                ai.facing = (ball.x < ai.x || ai.hasBall) ? -1 : 1;
-                p1.isShooting = keys['ShiftLeft'] && p1.hasBall;
-
-                if(keys['KeyD']) p1.vx += p1.speed;
-                if(keys['KeyA']) p1.vx -= p1.speed;
-                if(keys['Space'] && p1.grounded) { p1.vy = p1.jump; p1.grounded = false; }
-                
-                if(keys['KeyW'] && p1DashCooldown === 0) {
-                    p1.vx = keys['KeyA'] ? -25 : 25; p1DashCooldown = 3; keys['KeyW'] = false; spawnText("DASH!", p1.x, p1.y - 60, "white");
-                }
-                if(keys['KeyS'] && !p1.hasBall && ai.hasBall && Math.abs(p1.x - ai.x) < 70) {
-                    ai.hasBall = false; p1.hasBall = true; spawnText("STEAL!", p1.x, p1.y - 60, "yellow");
-                }
-                if(keys['KeyB'] && !p1.grounded && ball.active && ball.vy < 0 && Math.abs(p1.x - ball.x) < 70 && Math.abs(p1.y - ball.y) < 70) {
-                    ball.vx *= -1; ball.vy = 5; spawnText("BLOCKED!", p1.x, p1.y - 50, "red");
-                }
-
-                // Player Shooting
-                let meterUi = document.getElementById('shot-meter-container'); let fillUi = document.getElementById('shot-fill');
-                if(keys['ShiftLeft'] && p1.hasBall) {
-                    isShooting = true; meterUi.style.display = 'block'; shotCharge += 3 * chargeDir;
-                    if(shotCharge > 100) { shotCharge = 100; chargeDir = -1; } if(shotCharge < 0) { shotCharge = 0; chargeDir = 1; }
-                    fillUi.style.width = shotCharge + '%';
-                } else if (!keys['ShiftLeft'] && isShooting) {
-                    isShooting = false; meterUi.style.display = 'none'; p1.hasBall = false; ball.active = true;
-                    ball.x = p1.x + 20; ball.y = p1.y - 60;
-                    
-                    let now = Date.now();
-                    if(now - lastShiftPress < 300 && p1.x > 750 && !p1.grounded) {
-                        ball.vx = 4; ball.vy = 12; shakeFrames = 15; spawnText("SLAM DUNK!", p1.x, p1.y - 80, "orange");
-                    } else {
-                        let accuracy = 1 - (Math.abs(50 - shotCharge) / 50); 
-                        if(accuracy > 0.9) spawnText("GREEN!", p1.x, p1.y - 50, "lime");
-                        accuracy += (player.stats.accuracy * 0.08); 
-                        ball.vx = 10; ball.vy = -15 * Math.max(0.5, accuracy);
-                    }
-                    shotCharge = 0; lastShiftPress = now;
-                }
-
-                // AI Engine (Runs only when NOT in multiplayer)
-                if (!isMultiplayer) {
-                    if (ai.actionTimer <= 0) {
-                        ai.actionTimer = Math.floor(Math.random() * 30) + 20; 
-                        
-                        if (ai.hasBall) {
-                            let roll = Math.random();
-                            if (roll < 0.40) {
-                                ai.currentAction = 'DRIVE';
-                                ai.targetX = 100 + Math.random() * 150;
-                            } else if (roll < 0.70) {
-                                ai.currentAction = 'PULLUP';
-                                ai.targetX = 220 + Math.random() * 200;
-                            } else if (roll < 0.85) {
-                                ai.currentAction = 'STEPBACK';
-                                ai.targetX = Math.min(800, ai.x + (60 + Math.random() * 40));
-                            } else {
-                                ai.currentAction = 'HESITATE';
-                            }
-                        } else if (p1.hasBall) {
-                            let roll = Math.random();
-                            if (roll < 0.35) ai.currentAction = 'PRESS';
-                            else if (roll < 0.65) ai.currentAction = 'SAG';
-                            else if (roll < 0.80) ai.currentAction = 'CONTEST';
-                            else ai.currentAction = 'MIRROR';
-                        } else {
-                            ai.currentAction = 'CHASE_BALL';
-                        }
-                    } else {
-                        ai.actionTimer--;
-                    }
-
-                    if (ai.hasBall) {
-                        if (ai.currentAction === 'DRIVE') {
-                            if (ai.x > ai.targetX) ai.vx -= ai.speed * 0.8;
-                            if (ai.x < 220 && ai.grounded) {
-                                if (Math.random() < 0.65) ai.vy = ai.jump; 
-                                ai.hasBall = false; ball.active = true; ai.isShooting = true;
-                                ball.x = ai.x - 20; ball.y = ai.y - 60; 
-                                ball.vx = -4 - (Math.random() * 3); 
-                                ball.vy = -10 - (Math.random() * 4);
-                                setTimeout(() => ai.isShooting = false, 400);
-                            }
-                        } else if (ai.currentAction === 'PULLUP') {
-                            if (Math.abs(ai.x - ai.targetX) > 20) {
-                                ai.vx += (ai.targetX < ai.x ? -1 : 1) * ai.speed * 0.7;
-                            } else if (ai.grounded) {
-                                if (Math.random() < 0.5) ai.vy = ai.jump;
-                                ai.hasBall = false; ball.active = true; ai.isShooting = true;
-                                ball.x = ai.x - 20; ball.y = ai.y - 60;
-                                ball.vx = -8 - (Math.random() * 2.5); 
-                                ball.vy = -13 - (Math.random() * 3);
-                                setTimeout(() => ai.isShooting = false, 500);
-                            }
-                        } else if (ai.currentAction === 'STEPBACK') {
-                            if (ai.x < ai.targetX) ai.vx += ai.speed * 1.1; 
-                            else ai.currentAction = 'PULLUP';
-                        } else if (ai.currentAction === 'HESITATE') {
-                            ai.vx *= 0.3;
-                        }
-                    } else if (p1.hasBall) {
-                        if (ai.currentAction === 'PRESS') {
-                            let targetPos = p1.x + 50;
-                            if (ai.x > targetPos) ai.vx -= ai.speed * 0.8;
-                            else if (ai.x < targetPos - 20) ai.vx += ai.speed * 0.8;
-                            
-                            if (Math.abs(ai.x - p1.x) < 65 && Math.random() < (0.015 * ai.level)) {
-                                p1.hasBall = false; ai.hasBall = true;
-                                spawnText("AI STEAL!", ai.x, ai.y - 60, "#ff4d4d");
-                            }
-                        } else if (ai.currentAction === 'SAG') {
-                            let rimGuardX = 250 + (p1.x * 0.4);
-                            if (ai.x > rimGuardX) ai.vx -= ai.speed * 0.6;
-                            else if (ai.x < rimGuardX) ai.vx += ai.speed * 0.6;
-                        } else if (ai.currentAction === 'CONTEST') {
-                            if (ai.grounded && Math.abs(ai.x - p1.x) < 110) {
-                                ai.vy = ai.jump;
-                                spawnText("CONTEST!", ai.x, ai.y - 50, "orange");
-                            }
-                            ai.currentAction = 'PRESS';
-                        } else if (ai.currentAction === 'MIRROR') {
-                            let idealDist = p1.x + 100;
-                            if (ai.x > idealDist + 20) ai.vx -= ai.speed * 0.5;
-                            else if (ai.x < idealDist - 20) ai.vx += ai.speed * 0.5;
-                        }
-                    } else if (ball.active) {
-                        if (ai.x < ball.x - 15) ai.vx += ai.speed * 0.7;
-                        if (ai.x > ball.x + 15) ai.vx -= ai.speed * 0.7;
-                        if (ball.y < ai.y - 60 && ai.grounded && Math.abs(ai.x - ball.x) < 60) {
-                            if (Math.random() < 0.08 * ai.level) ai.vy = ai.jump;
-                        }
-                    }
-                }
-            }
-
-            // Ball Physics
-            if(p1.hasBall) {
-                ball.x = p1.x + (p1.facing * 20); 
-                ball.y = p1.y + (Math.abs(Math.cos(Date.now() / 150)) * 25) - 10; ball.rot += 0.1;
-            } else if (ai.hasBall) {
-                ball.x = ai.x + (ai.facing * 20);
-                ball.y = ai.y + (Math.abs(Math.cos(Date.now() / 150)) * 25) - 10; ball.rot -= 0.1;
-            } else if (ball.active) {
-                ball.vy += gravity; ball.x += ball.vx; ball.y += ball.vy; ball.rot += ball.vx * 0.05;
-
-                if(ball.x - ball.r < 0) { ball.x = ball.r; ball.vx *= -0.8; }
-                if(ball.x + ball.r > canvas.width) { ball.x = canvas.width - ball.r; ball.vx *= -0.8; }
-                if(ball.y >= floorY + 15) { ball.y = floorY + 15; ball.vy *= -0.7; ball.vx *= 0.8; }
-                
-                if(ball.y > floorY - 50 && ball.vy > 0 && gameState.resetTimer <= 0) {
-                    if(Math.abs(p1.x - ball.x) < 50) { p1.hasBall = true; ball.active = false; }
-                    else if(Math.abs(ai.x - ball.x) < 50) { ai.hasBall = true; ball.active = false; }
-                }
-
-                // Left Hoop Collision & Scoring (P2 / AI Scores)
-                const rimLeftX = 70; const rimY = 220;
-                if (ball.y >= rimY - 10 && ball.y <= rimY + 10 && ball.x >= rimLeftX - 35 && ball.x <= rimLeftX + 5) {
-                    if (ball.vy > 0) {
-                        p2Score += 2;
-                        spawnText("+2 AI!", rimLeftX + 20, rimY - 20, "#ff4d4d");
-                        triggerScoreReset(false);
-                    }
-                }
-
-                // Right Hoop Collision & Scoring (P1 Scores)
-                const rimRightX = 830;
-                if (ball.y >= rimY - 10 && ball.y <= rimY + 10 && ball.x >= rimRightX - 5 && ball.x <= rimRightX + 35) {
-                    if (ball.vy > 0) {
-                        p1Score += 2;
-                        spawnText("+2 BUCKET!", rimRightX - 40, rimY - 20, "lime");
-                        triggerScoreReset(true);
-                    }
-                }
-            }
-
-            drawHoops();
-            drawStickman(p1);
-            drawStickman(ai);
-
-            // Render Basketball
-            ctx.save();
-            ctx.translate(ball.x, ball.y);
-            ctx.rotate(ball.rot);
-            ctx.fillStyle = '#ff6b00';
-            ctx.beginPath(); ctx.arc(0, 0, ball.r, 0, Math.PI * 2); ctx.fill();
-            ctx.strokeStyle = '#000'; ctx.lineWidth = 2;
-            ctx.beginPath(); ctx.arc(0, 0, ball.r, 0, Math.PI * 2); ctx.stroke();
-            ctx.beginPath(); ctx.moveTo(-ball.r, 0); ctx.lineTo(ball.r, 0); ctx.stroke();
-            ctx.beginPath(); ctx.moveTo(0, -ball.r); ctx.lineTo(0, ball.r); ctx.stroke();
-            ctx.restore();
-
-            // Render Text Particles
-            for (let i = particles.length - 1; i >= 0; i--) {
-                let p = particles[i];
-                ctx.font = '900 22px Segoe UI';
-                ctx.fillStyle = p.color;
-                ctx.shadowColor = 'black'; ctx.shadowBlur = 4;
-                ctx.fillText(p.text, p.x, p.y);
-                ctx.shadowBlur = 0;
-                p.y += p.vy; p.life--;
-                if (p.life <= 0) particles.splice(i, 1);
-            }
-
-            // Countdown Overlay
-            if (gameState.resetTimer > 0) {
-                ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
-                ctx.fillRect(0, 0, canvas.width, canvas.height);
-                ctx.font = '900 60px Segoe UI';
-                ctx.fillStyle = 'var(--gold)';
-                ctx.textAlign = 'center';
-                let count = Math.ceil(gameState.resetTimer / 60);
-                ctx.fillText(count > 0 ? count : 'GO!', canvas.width / 2, canvas.height / 2);
-                ctx.textAlign = 'left';
-            }
-
-            requestAnimationFrame(update);
-        }
-
-        function syncGameStateFromHost(state) {
-            p1.x = state.p1.x; p1.y = state.p1.y; p1.hasBall = state.p1.hasBall;
-            ai.x = state.p2.x; ai.y = state.p2.y; ai.hasBall = state.p2.hasBall;
-            ball.x = state.ball.x; ball.y = state.ball.y; ball.active = state.ball.active;
-            p1Score = state.score.p1; p2Score = state.score.p2;
-            timeRemaining = state.time;
-            updateScoreboard();
-        }
-
-        function applyGuestInputToAI(inputs) {
-            if (inputs.right) ai.vx += ai.speed;
-            if (inputs.left) ai.vx -= ai.speed;
-            if (inputs.jump && ai.grounded) { ai.vy = ai.jump; ai.grounded = false; }
-            
-            if (inputs.shoot && ai.hasBall) {
-                ai.hasBall = false;
-                ball.active = true;
-                ball.x = ai.x - 20; ball.y = ai.y - 60;
-                ball.vx = -10; ball.vy = -14;
-            }
-        }
-
-        function drawHoops() {
-            ctx.fillStyle = '#fff'; ctx.fillRect(35, 120, 10, 120);
-            ctx.strokeStyle = '#ff3333'; ctx.lineWidth = 5;
-            ctx.beginPath(); ctx.moveTo(45, 220); ctx.lineTo(75, 220); ctx.stroke();
-
-            ctx.fillStyle = '#fff'; ctx.fillRect(855, 120, 10, 120);
-            ctx.strokeStyle = '#ff3333'; ctx.lineWidth = 5;
-            ctx.beginPath(); ctx.moveTo(825, 220); ctx.lineTo(855, 220); ctx.stroke();
-        }
-
-        function triggerScoreReset(toAI) {
-            gameState.resetTimer = 120;
-            gameState.ballToAI = toAI;
-            updateScoreboard();
-        }
-
-        function resetPositions(aiGetsBall) {
-            p1.x = 250; p1.y = 450; p1.vx = 0; p1.vy = 0;
-            ai.x = 650; ai.y = 450; ai.vx = 0; ai.vy = 0;
-            ball.active = false; ball.vx = 0; ball.vy = 0;
-
-            if (aiGetsBall) {
-                p1.hasBall = false;
-                ai.hasBall = true;
-            } else {
-                p1.hasBall = true;
-                ai.hasBall = false;
-            }
-        }
-
-        function endGame() {
-            gameState.active = false;
-            clearInterval(timerInterval);
-            document.getElementById('game-container').style.display = 'none';
-
-            let won = p1Score > p2Score;
-            let coinReward = won ? 100 : 30;
-            let xpReward = won ? 100 : 50;
-
-            player.coins += coinReward;
-            addXP(xpReward);
-
-            if (gameState.mode === 'career' && won) {
-                if (player.inFinals) {
-                    player.finalsGame++;
-                    if (player.finalsGame > 5) {
-                        alert("🏆 CHAMPION! You won the NBA Finals! 🏆\nReward: +500 Coins!");
-                        player.coins += 500;
-                        player.inFinals = false;
-                        player.careerWins = 0;
-                        player.finalsGame = 1;
-                    }
-                } else {
-                    player.careerWins++;
-                    if (player.careerWins >= 5) {
-                        player.inFinals = true;
-                        alert("🎉 You made it to the NBA Finals! Get ready for a tough series!");
-                    }
-                }
-            }
-
-            alert(`${won ? 'VICTORY!' : 'GAME OVER'}\nFinal Score: ${p1Score} - ${p2Score}\nRewards: +${coinReward} Coins, +${xpReward} XP`);
-            leaveLobby();
-            nav('main-menu');
-        }
-    </script>
-</body>
-</html>
+            timeRemaining = 120; p1Score = 0; p2Score = 0
