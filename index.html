@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Cartoon Hoops 1v1 - Stickman Pro</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <style>
         :root {
             --primary: #9370db; 
@@ -43,6 +44,7 @@
         input[type="text"] {
             padding: 15px; width: 80%; margin-bottom: 25px; border-radius: 10px; border: 2px solid var(--primary); 
             background: rgba(255,255,255,0.1); color: white; font-size: 18px; outline: none; transition: 0.3s;
+            text-align: center;
         }
         input[type="text"]:focus { border-color: var(--gold); background: rgba(255,255,255,0.2); }
         
@@ -118,6 +120,7 @@
             <h2>MAIN MENU</h2>
             <button onclick="nav('career-screen')">Career Mode 🏆</button>
             <button onclick="startMatch('quick')">Quick Match ⚡</button>
+            <button onclick="nav('multiplayer-screen')">Online 1v1 🌐</button>
             <button onclick="nav('upgrade-screen')">Player Upgrades 💪</button>
             <button onclick="nav('store-screen')">Card Store 🃏</button>
             <button onclick="nav('bp-screen')">Battle Pass ⭐</button>
@@ -134,6 +137,27 @@
                 <li><span>S</span> - Steal Ball</li>
                 <li><span>B</span> - Block Shot</li>
             </ul>
+        </div>
+    </div>
+
+    <div id="multiplayer-screen" class="screen">
+        <div class="menu-box">
+            <h2>ONLINE MULTIPLAYER 🌐</h2>
+            
+            <div id="mp-lobby-selection">
+                <button onclick="hostRoom()">Host Game (Create Code)</button>
+                <div style="margin: 20px 0; border-bottom: 1px solid rgba(255,255,255,0.2);"></div>
+                <input type="text" id="join-code-input" placeholder="ENTER 6-DIGIT CODE" style="text-transform: uppercase;">
+                <button onclick="joinRoom()">Join Game</button>
+            </div>
+
+            <div id="mp-waiting-room" style="display: none; margin-top: 20px;">
+                <p>Share this Room Code with a friend:</p>
+                <h1 id="room-code-display" style="color: var(--gold); letter-spacing: 5px;">------</h1>
+                <p class="loading-text">Waiting for opponent to join...</p>
+            </div>
+
+            <button class="back-btn" onclick="leaveLobby(); nav('main-menu')">Back to Menu</button>
         </div>
     </div>
 
@@ -205,6 +229,16 @@
     <script>
         const courtImg = new Image(); courtImg.src = 'image_7033d5.jpg';
 
+        // --- SUPABASE INITIALIZATION ---
+        const SUPABASE_URL = "https://qtrkhbteealvshknhbra.supabase.co";
+        const SUPABASE_KEY = "sb_publishable_EbWZ7cYFsGtKiZOdUbyjsw_opDfzUe7";
+        const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+        let roomChannel = null;
+        let isHost = false;
+        let isMultiplayer = false;
+        let currentRoomCode = "";
+
         let player = { name: "Baller", coins: 150, xp: 0, bpLevel: 1, stats: { speed: 1, jump: 1, accuracy: 1 }, careerWins: 0, inFinals: false, finalsGame: 1 };
         let gameState = { mode: '', active: false, resetTimer: 0, ballToAI: false };
 
@@ -253,6 +287,90 @@
             updateUI();
         }
 
+        // --- MULTIPLAYER ROOM HANDLERS ---
+        function generateRoomCode() {
+            return Math.random().toString(36).substring(2, 8).toUpperCase();
+        }
+
+        function hostRoom() {
+            currentRoomCode = generateRoomCode();
+            isHost = true;
+            isMultiplayer = true;
+
+            document.getElementById('mp-lobby-selection').style.display = 'none';
+            document.getElementById('mp-waiting-room').style.display = 'block';
+            document.getElementById('room-code-display').innerText = currentRoomCode;
+
+            subscribeToRoom(currentRoomCode);
+        }
+
+        function joinRoom() {
+            const code = document.getElementById('join-code-input').value.trim().toUpperCase();
+            if (code.length < 4) {
+                alert("Please enter a valid room code.");
+                return;
+            }
+            
+            currentRoomCode = code;
+            isHost = false;
+            isMultiplayer = true;
+
+            subscribeToRoom(currentRoomCode);
+        }
+
+        function subscribeToRoom(code) {
+            roomChannel = supabaseClient.channel(`room_${code}`, {
+                config: { broadcast: { self: false } }
+            });
+
+            roomChannel
+                .on('broadcast', { event: 'player_joined' }, () => {
+                    if (isHost) {
+                        roomChannel.send({ type: 'broadcast', event: 'start_game', payload: {} });
+                        startOnlineMatch();
+                    }
+                })
+                .on('broadcast', { event: 'start_game' }, () => {
+                    if (!isHost) {
+                        startOnlineMatch();
+                    }
+                })
+                .on('broadcast', { event: 'game_state' }, (payload) => {
+                    if (!isHost && gameState.active) {
+                        syncGameStateFromHost(payload.payload);
+                    }
+                })
+                .on('broadcast', { event: 'client_input' }, (payload) => {
+                    if (isHost && gameState.active) {
+                        applyGuestInputToAI(payload.payload);
+                    }
+                })
+                .subscribe((status) => {
+                    if (status === 'SUBSCRIBED') {
+                        if (!isHost) {
+                            roomChannel.send({ type: 'broadcast', event: 'player_joined', payload: {} });
+                        }
+                    }
+                });
+        }
+
+        function startOnlineMatch() {
+            document.getElementById('mp-waiting-room').style.display = 'none';
+            document.getElementById('mp-lobby-selection').style.display = 'block';
+            
+            startMatch('multiplayer');
+            ai.color = '#ff4d4d'; 
+        }
+
+        function leaveLobby() {
+            if (roomChannel) {
+                supabaseClient.removeChannel(roomChannel);
+                roomChannel = null;
+            }
+            isMultiplayer = false;
+            isHost = false;
+        }
+
         const canvas = document.getElementById('gameCanvas'); const ctx = canvas.getContext('2d');
         let timerInterval, timeRemaining = 120, p1Score = 0, p2Score = 0;
         let keys = {}; window.addEventListener('keydown', e => keys[e.code] = true); window.addEventListener('keyup', e => keys[e.code] = false);
@@ -263,31 +381,33 @@
             gameState.mode = mode; document.getElementById('game-container').style.display = 'block'; nav('game-screen');
             timeRemaining = 120; p1Score = 0; p2Score = 0; particles = []; updateScoreboard();
 
-            // Calculate AI Difficulty based on career progression
             let aiLevel = 1;
             if (mode === 'career') { aiLevel = player.inFinals ? (4 + player.finalsGame) : (1 + player.careerWins); } 
-            else { aiLevel = 2; } // Quick match default is easy-medium
+            else { aiLevel = 2; }
             
-            let aiSpeed = 1.0 + (aiLevel * 0.15); // Starts very slow
-            let aiJump = -11 - (aiLevel * 0.4); // Starts with weak jump
+            let aiSpeed = 1.0 + (aiLevel * 0.15);
+            let aiJump = -11 - (aiLevel * 0.4);
 
             p1 = { x: 250, y: 450, w: 50, h: 80, vx: 0, vy: 0, speed: 1.5 + (player.stats.speed * 0.2), jump: -14 - (player.stats.jump * 0.5), grounded: false, hasBall: true, color: '#4da6ff', isShooting: false, facing: 1 };
-            ai = { x: 650, y: 450, w: 50, h: 80, vx: 0, vy: 0, speed: aiSpeed, jump: aiJump, grounded: false, hasBall: false, color: '#ff4d4d', isShooting: false, facing: -1, level: aiLevel };
+            ai = { 
+                x: 650, y: 450, w: 50, h: 80, vx: 0, vy: 0, speed: aiSpeed, jump: aiJump, grounded: false, 
+                hasBall: false, color: '#ff4d4d', isShooting: false, facing: -1, level: aiLevel,
+                actionTimer: 0, currentAction: 'NORMAL', targetX: 650
+            };
             ball = { x: 250, y: 450, r: 14, vx: 0, vy: 0, active: false, rot: 0 };
 
             gameState.active = true;
-            gameState.resetTimer = 180; // Triggers a 3 second countdown when game starts
+            gameState.resetTimer = 180;
             gameState.ballToAI = false;
             resetPositions(false);
 
             clearInterval(timerInterval);
             timerInterval = setInterval(() => {
-                if(!gameState.active || gameState.resetTimer > 0) return; // Pauses clock during cooldowns
+                if(!gameState.active || gameState.resetTimer > 0) return;
                 
                 if (timeRemaining > 0) { timeRemaining--; updateScoreboard(); }
                 if(p1DashCooldown > 0) p1DashCooldown--;
                 
-                // Allow buzzer beaters if time runs out but ball is in the air
                 if(timeRemaining <= 0 && !ball.active) { endGame(); }
             }, 1000);
             
@@ -334,6 +454,39 @@
 
         function update() {
             if(!gameState.active) return;
+
+            // MULTIPLAYER BROADCAST ENGINE
+            if (isMultiplayer) {
+                if (isHost) {
+                    if (roomChannel && gameState.active) {
+                        roomChannel.send({
+                            type: 'broadcast',
+                            event: 'game_state',
+                            payload: {
+                                p1: { x: p1.x, y: p1.y, vx: p1.vx, vy: p1.vy, hasBall: p1.hasBall, isShooting: p1.isShooting },
+                                p2: { x: ai.x, y: ai.y, vx: ai.vx, vy: ai.vy, hasBall: ai.hasBall, isShooting: ai.isShooting },
+                                ball: { x: ball.x, y: ball.y, vx: ball.vx, vy: ball.vy, active: ball.active, rot: ball.rot },
+                                score: { p1: p1Score, p2: p2Score },
+                                time: timeRemaining
+                            }
+                        });
+                    }
+                } else {
+                    if (roomChannel && gameState.active) {
+                        roomChannel.send({
+                            type: 'broadcast',
+                            event: 'client_input',
+                            payload: {
+                                left: keys['KeyA'],
+                                right: keys['KeyD'],
+                                jump: keys['Space'],
+                                shoot: keys['ShiftLeft'],
+                                steal: keys['KeyS']
+                            }
+                        });
+                    }
+                }
+            }
             
             if (shakeFrames > 0) { canvas.style.transform = `translate(${Math.random()*10-5}px, ${Math.random()*10-5}px)`; shakeFrames--; } 
             else { canvas.style.transform = `translate(0, 0)`; }
@@ -349,7 +502,7 @@
 
             const floorY = 450; const gravity = 0.7; const friction = 0.85;
 
-            // Physics Update (Always runs so players/ball land smoothly)
+            // Physics Update
             p1.vy += gravity; p1.y += p1.vy; p1.x += p1.vx; p1.vx *= friction;
             ai.vy += gravity; ai.y += ai.vy; ai.x += ai.vx; ai.vx *= friction;
             
@@ -358,18 +511,13 @@
             if(p1.x < 25) { p1.x = 25; p1.vx = 0; } if(p1.x > 875) { p1.x = 875; p1.vx = 0; }
             if(ai.x < 25) { ai.x = 25; ai.vx = 0; } if(ai.x > 875) { ai.x = 875; ai.vx = 0; }
 
-            // Split Gameplay Logic vs Cooldown logic
             if (gameState.resetTimer > 0) {
                 gameState.resetTimer--;
-                
-                // Triggers immediately when countdown has 2 secs left (gives ball 1s to fall from net naturally)
                 if (gameState.resetTimer === 120) { resetPositions(gameState.ballToAI); }
-                
                 p1.facing = p1.hasBall ? 1 : (ball.x > p1.x ? 1 : -1);
                 ai.facing = ai.hasBall ? -1 : (ball.x < ai.x ? -1 : 1);
 
             } else {
-                // Controls & States
                 p1.facing = (ball.x > p1.x || p1.hasBall) ? 1 : -1;
                 ai.facing = (ball.x < ai.x || ai.hasBall) ? -1 : 1;
                 p1.isShooting = keys['ShiftLeft'] && p1.hasBall;
@@ -388,7 +536,7 @@
                     ball.vx *= -1; ball.vy = 5; spawnText("BLOCKED!", p1.x, p1.y - 50, "red");
                 }
 
-                // Shooting Mechanics
+                // Player Shooting
                 let meterUi = document.getElementById('shot-meter-container'); let fillUi = document.getElementById('shot-fill');
                 if(keys['ShiftLeft'] && p1.hasBall) {
                     isShooting = true; meterUi.style.display = 'block'; shotCharge += 3 * chargeDir;
@@ -410,29 +558,102 @@
                     shotCharge = 0; lastShiftPress = now;
                 }
 
-                // Scaling AI Intelligence
-                if(ai.hasBall) {
-                    let shootDist = 200 + ((10 - ai.level) * 15);
-                    if(ai.x > shootDist) ai.vx -= ai.speed * 0.5;
-                    else if (ai.grounded) {
-                        ai.hasBall = false; ball.active = true; ai.isShooting = true;
-                        ball.x = ai.x - 20; ball.y = ai.y - 60; ball.vx = -9; ball.vy = -14; 
-                        setTimeout(() => ai.isShooting = false, 500);
+                // AI Engine (Runs only when NOT in multiplayer)
+                if (!isMultiplayer) {
+                    if (ai.actionTimer <= 0) {
+                        ai.actionTimer = Math.floor(Math.random() * 30) + 20; 
+                        
+                        if (ai.hasBall) {
+                            let roll = Math.random();
+                            if (roll < 0.40) {
+                                ai.currentAction = 'DRIVE';
+                                ai.targetX = 100 + Math.random() * 150;
+                            } else if (roll < 0.70) {
+                                ai.currentAction = 'PULLUP';
+                                ai.targetX = 220 + Math.random() * 200;
+                            } else if (roll < 0.85) {
+                                ai.currentAction = 'STEPBACK';
+                                ai.targetX = Math.min(800, ai.x + (60 + Math.random() * 40));
+                            } else {
+                                ai.currentAction = 'HESITATE';
+                            }
+                        } else if (p1.hasBall) {
+                            let roll = Math.random();
+                            if (roll < 0.35) ai.currentAction = 'PRESS';
+                            else if (roll < 0.65) ai.currentAction = 'SAG';
+                            else if (roll < 0.80) ai.currentAction = 'CONTEST';
+                            else ai.currentAction = 'MIRROR';
+                        } else {
+                            ai.currentAction = 'CHASE_BALL';
+                        }
+                    } else {
+                        ai.actionTimer--;
                     }
-                } else {
-                    if(ball.active) {
-                        if(ai.x < ball.x - 20) ai.vx += ai.speed * 0.6; 
-                        if(ai.x > ball.x + 20) ai.vx -= ai.speed * 0.6;
-                        // AI only jumps to block on easier settings if the ball is extremely close
-                        if(ball.y < ai.y - (80 + (10 - ai.level)*15) && ai.grounded && Math.abs(ai.x - ball.x) < (30 + ai.level*5)) ai.vy = ai.jump; 
-                    } else if(p1.hasBall) { 
-                        if(ai.x > p1.x + 150) ai.vx -= ai.speed * 0.5; 
-                        else if (ai.x < p1.x + 80) ai.vx += ai.speed * 0.5; 
+
+                    if (ai.hasBall) {
+                        if (ai.currentAction === 'DRIVE') {
+                            if (ai.x > ai.targetX) ai.vx -= ai.speed * 0.8;
+                            if (ai.x < 220 && ai.grounded) {
+                                if (Math.random() < 0.65) ai.vy = ai.jump; 
+                                ai.hasBall = false; ball.active = true; ai.isShooting = true;
+                                ball.x = ai.x - 20; ball.y = ai.y - 60; 
+                                ball.vx = -4 - (Math.random() * 3); 
+                                ball.vy = -10 - (Math.random() * 4);
+                                setTimeout(() => ai.isShooting = false, 400);
+                            }
+                        } else if (ai.currentAction === 'PULLUP') {
+                            if (Math.abs(ai.x - ai.targetX) > 20) {
+                                ai.vx += (ai.targetX < ai.x ? -1 : 1) * ai.speed * 0.7;
+                            } else if (ai.grounded) {
+                                if (Math.random() < 0.5) ai.vy = ai.jump;
+                                ai.hasBall = false; ball.active = true; ai.isShooting = true;
+                                ball.x = ai.x - 20; ball.y = ai.y - 60;
+                                ball.vx = -8 - (Math.random() * 2.5); 
+                                ball.vy = -13 - (Math.random() * 3);
+                                setTimeout(() => ai.isShooting = false, 500);
+                            }
+                        } else if (ai.currentAction === 'STEPBACK') {
+                            if (ai.x < ai.targetX) ai.vx += ai.speed * 1.1; 
+                            else ai.currentAction = 'PULLUP';
+                        } else if (ai.currentAction === 'HESITATE') {
+                            ai.vx *= 0.3;
+                        }
+                    } else if (p1.hasBall) {
+                        if (ai.currentAction === 'PRESS') {
+                            let targetPos = p1.x + 50;
+                            if (ai.x > targetPos) ai.vx -= ai.speed * 0.8;
+                            else if (ai.x < targetPos - 20) ai.vx += ai.speed * 0.8;
+                            
+                            if (Math.abs(ai.x - p1.x) < 65 && Math.random() < (0.015 * ai.level)) {
+                                p1.hasBall = false; ai.hasBall = true;
+                                spawnText("AI STEAL!", ai.x, ai.y - 60, "#ff4d4d");
+                            }
+                        } else if (ai.currentAction === 'SAG') {
+                            let rimGuardX = 250 + (p1.x * 0.4);
+                            if (ai.x > rimGuardX) ai.vx -= ai.speed * 0.6;
+                            else if (ai.x < rimGuardX) ai.vx += ai.speed * 0.6;
+                        } else if (ai.currentAction === 'CONTEST') {
+                            if (ai.grounded && Math.abs(ai.x - p1.x) < 110) {
+                                ai.vy = ai.jump;
+                                spawnText("CONTEST!", ai.x, ai.y - 50, "orange");
+                            }
+                            ai.currentAction = 'PRESS';
+                        } else if (ai.currentAction === 'MIRROR') {
+                            let idealDist = p1.x + 100;
+                            if (ai.x > idealDist + 20) ai.vx -= ai.speed * 0.5;
+                            else if (ai.x < idealDist - 20) ai.vx += ai.speed * 0.5;
+                        }
+                    } else if (ball.active) {
+                        if (ai.x < ball.x - 15) ai.vx += ai.speed * 0.7;
+                        if (ai.x > ball.x + 15) ai.vx -= ai.speed * 0.7;
+                        if (ball.y < ai.y - 60 && ai.grounded && Math.abs(ai.x - ball.x) < 60) {
+                            if (Math.random() < 0.08 * ai.level) ai.vy = ai.jump;
+                        }
                     }
                 }
             }
 
-            // Ball Physics & Scoring Detect (Always runs to make ball falling look natural)
+            // Ball Physics
             if(p1.hasBall) {
                 ball.x = p1.x + (p1.facing * 20); 
                 ball.y = p1.y + (Math.abs(Math.cos(Date.now() / 150)) * 25) - 10; ball.rot += 0.1;
@@ -446,113 +667,160 @@
                 if(ball.x + ball.r > canvas.width) { ball.x = canvas.width - ball.r; ball.vx *= -0.8; }
                 if(ball.y >= floorY + 15) { ball.y = floorY + 15; ball.vy *= -0.7; ball.vx *= 0.8; }
                 
-                // Pick up ball mechanics (blocked during cooldown)
                 if(ball.y > floorY - 50 && ball.vy > 0 && gameState.resetTimer <= 0) {
                     if(Math.abs(p1.x - ball.x) < 50) { p1.hasBall = true; ball.active = false; }
                     else if(Math.abs(ai.x - ball.x) < 50) { ai.hasBall = true; ball.active = false; }
                 }
 
-                // Check for goals (blocked during cooldown to prevent double scoring)
-                if (gameState.resetTimer <= 0) {
-                    if(ball.x > 820 && ball.x < 880 && ball.y > 240 && ball.y < 280 && ball.vy > 0) { scorePoints('p1', p1.x < 450 ? 3 : 2); }
-                    if(ball.x > 20 && ball.x < 80 && ball.y > 240 && ball.y < 280 && ball.vy > 0) { scorePoints('ai', ai.x > 450 ? 3 : 2); }
+                // Left Hoop Collision & Scoring (P2 / AI Scores)
+                const rimLeftX = 70; const rimY = 220;
+                if (ball.y >= rimY - 10 && ball.y <= rimY + 10 && ball.x >= rimLeftX - 35 && ball.x <= rimLeftX + 5) {
+                    if (ball.vy > 0) {
+                        p2Score += 2;
+                        spawnText("+2 AI!", rimLeftX + 20, rimY - 20, "#ff4d4d");
+                        triggerScoreReset(false);
+                    }
+                }
+
+                // Right Hoop Collision & Scoring (P1 Scores)
+                const rimRightX = 830;
+                if (ball.y >= rimY - 10 && ball.y <= rimY + 10 && ball.x >= rimRightX - 5 && ball.x <= rimRightX + 35) {
+                    if (ball.vy > 0) {
+                        p1Score += 2;
+                        spawnText("+2 BUCKET!", rimRightX - 40, rimY - 20, "lime");
+                        triggerScoreReset(true);
+                    }
                 }
             }
 
-            // Draw Court Elements
-            ctx.strokeStyle = 'rgba(255,255,255,0.5)'; ctx.lineWidth = 3;
-            ctx.beginPath(); ctx.moveTo(450, 0); ctx.lineTo(450, 550); ctx.stroke();
-            ctx.beginPath(); ctx.arc(450, 450, 200, 0, Math.PI, true); ctx.stroke();
-
-            ctx.fillStyle = 'rgba(255,255,255,0.2)'; ctx.fillRect(10, 180, 10, 100); ctx.fillRect(880, 180, 10, 100); 
-            ctx.fillStyle = '#ff5500'; ctx.fillRect(20, 250, 60, 8); ctx.fillRect(820, 250, 60, 8); 
-
-            // Draw Stickmen Players
+            drawHoops();
             drawStickman(p1);
             drawStickman(ai);
 
-            // Draw Ball
+            // Render Basketball
             ctx.save();
-            ctx.translate(ball.x, ball.y); ctx.rotate(ball.rot);
-            ctx.fillStyle = '#ff7b00';
+            ctx.translate(ball.x, ball.y);
+            ctx.rotate(ball.rot);
+            ctx.fillStyle = '#ff6b00';
             ctx.beginPath(); ctx.arc(0, 0, ball.r, 0, Math.PI * 2); ctx.fill();
-            ctx.strokeStyle = '#000'; ctx.lineWidth = 1.5;
+            ctx.strokeStyle = '#000'; ctx.lineWidth = 2;
+            ctx.beginPath(); ctx.arc(0, 0, ball.r, 0, Math.PI * 2); ctx.stroke();
             ctx.beginPath(); ctx.moveTo(-ball.r, 0); ctx.lineTo(ball.r, 0); ctx.stroke();
             ctx.beginPath(); ctx.moveTo(0, -ball.r); ctx.lineTo(0, ball.r); ctx.stroke();
             ctx.restore();
 
-            // Draw Timer Countdown Overlay
-            if (gameState.resetTimer > 0 && gameState.resetTimer <= 120) {
-                let count = Math.ceil(gameState.resetTimer / 60);
-                if (count > 0) {
-                    ctx.fillStyle = "rgba(0,0,0,0.4)";
-                    ctx.fillRect(0,0,canvas.width,canvas.height);
-                    
-                    ctx.fillStyle = "var(--gold)";
-                    ctx.font = "bold 120px Arial";
-                    ctx.textAlign = "center";
-                    ctx.textBaseline = "middle";
-                    ctx.fillText(count, canvas.width/2, canvas.height/2);
-                    ctx.strokeStyle = "white";
-                    ctx.lineWidth = 4;
-                    ctx.strokeText(count, canvas.width/2, canvas.height/2);
-                    ctx.textBaseline = "alphabetic"; // Reset
-                }
+            // Render Text Particles
+            for (let i = particles.length - 1; i >= 0; i--) {
+                let p = particles[i];
+                ctx.font = '900 22px Segoe UI';
+                ctx.fillStyle = p.color;
+                ctx.shadowColor = 'black'; ctx.shadowBlur = 4;
+                ctx.fillText(p.text, p.x, p.y);
+                ctx.shadowBlur = 0;
+                p.y += p.vy; p.life--;
+                if (p.life <= 0) particles.splice(i, 1);
             }
 
-            for(let i = particles.length - 1; i >= 0; i--) {
-                let p = particles[i]; ctx.fillStyle = p.color; ctx.font = "bold 24px Arial"; ctx.textAlign = "center";
-                ctx.globalAlpha = p.life / 60; ctx.fillText(p.text, p.x, p.y); p.y += p.vy; p.life--;
-                if(p.life <= 0) particles.splice(i, 1);
+            // Countdown Overlay
+            if (gameState.resetTimer > 0) {
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                ctx.font = '900 60px Segoe UI';
+                ctx.fillStyle = 'var(--gold)';
+                ctx.textAlign = 'center';
+                let count = Math.ceil(gameState.resetTimer / 60);
+                ctx.fillText(count > 0 ? count : 'GO!', canvas.width / 2, canvas.height / 2);
+                ctx.textAlign = 'left';
             }
-            ctx.globalAlpha = 1.0;
 
             requestAnimationFrame(update);
         }
 
-        function scorePoints(team, pts) {
-            let isBuzzer = timeRemaining <= 0;
-            if(isBuzzer) { pts = 5; spawnText("BUZZER BEATER! +5", 450, 200, "gold"); shakeFrames = 20; }
-            else { spawnText(`SWISH! +${pts}`, team === 'p1' ? 850 : 50, 200, "white"); }
-            
-            if(team === 'p1') p1Score += pts; else p2Score += pts; 
+        function syncGameStateFromHost(state) {
+            p1.x = state.p1.x; p1.y = state.p1.y; p1.hasBall = state.p1.hasBall;
+            ai.x = state.p2.x; ai.y = state.p2.y; ai.hasBall = state.p2.hasBall;
+            ball.x = state.ball.x; ball.y = state.ball.y; ball.active = state.ball.active;
+            p1Score = state.score.p1; p2Score = state.score.p2;
+            timeRemaining = state.time;
             updateScoreboard();
-
-            // Set 3 second timer (60 frames per second * 3)
-            gameState.resetTimer = 180; 
-            gameState.ballToAI = (team === 'p1'); // Give ball to the team that was scored on
         }
 
-        function resetPositions(giveBallToAI) { 
-            p1.x = 250; p1.y = 450; p1.vx = 0; p1.isShooting = false; p1.hasBall = !giveBallToAI;
-            ai.x = 650; ai.y = 450; ai.vx = 0; ai.isShooting = false; ai.hasBall = giveBallToAI;
-            ball.active = false; shotCharge = 0; isShooting = false; 
-            document.getElementById('shot-meter-container').style.display = 'none';
+        function applyGuestInputToAI(inputs) {
+            if (inputs.right) ai.vx += ai.speed;
+            if (inputs.left) ai.vx -= ai.speed;
+            if (inputs.jump && ai.grounded) { ai.vy = ai.jump; ai.grounded = false; }
+            
+            if (inputs.shoot && ai.hasBall) {
+                ai.hasBall = false;
+                ball.active = true;
+                ball.x = ai.x - 20; ball.y = ai.y - 60;
+                ball.vx = -10; ball.vy = -14;
+            }
+        }
+
+        function drawHoops() {
+            ctx.fillStyle = '#fff'; ctx.fillRect(35, 120, 10, 120);
+            ctx.strokeStyle = '#ff3333'; ctx.lineWidth = 5;
+            ctx.beginPath(); ctx.moveTo(45, 220); ctx.lineTo(75, 220); ctx.stroke();
+
+            ctx.fillStyle = '#fff'; ctx.fillRect(855, 120, 10, 120);
+            ctx.strokeStyle = '#ff3333'; ctx.lineWidth = 5;
+            ctx.beginPath(); ctx.moveTo(825, 220); ctx.lineTo(855, 220); ctx.stroke();
+        }
+
+        function triggerScoreReset(toAI) {
+            gameState.resetTimer = 120;
+            gameState.ballToAI = toAI;
+            updateScoreboard();
+        }
+
+        function resetPositions(aiGetsBall) {
+            p1.x = 250; p1.y = 450; p1.vx = 0; p1.vy = 0;
+            ai.x = 650; ai.y = 450; ai.vx = 0; ai.vy = 0;
+            ball.active = false; ball.vx = 0; ball.vy = 0;
+
+            if (aiGetsBall) {
+                p1.hasBall = false;
+                ai.hasBall = true;
+            } else {
+                p1.hasBall = true;
+                ai.hasBall = false;
+            }
         }
 
         function endGame() {
-            gameState.active = false; clearInterval(timerInterval);
-            document.getElementById('game-container').style.display = 'none'; document.getElementById('shot-meter-container').style.display = 'none';
-            let won = p1Score > p2Score; let msg = won ? `VICTORY! ${p1Score} - ${p2Score}` : `DEFEAT! ${p1Score} - ${p2Score}`;
-            
-            if (p1Score === p2Score) { msg = `TIE GAME! ${p1Score} - ${p2Score}`; player.coins += 5; addXP(75); }
-            else if(won) { player.coins += 10; addXP(100); } 
-            else { player.coins += 5; addXP(50); }
+            gameState.active = false;
+            clearInterval(timerInterval);
+            document.getElementById('game-container').style.display = 'none';
 
-            if(gameState.mode === 'career' && p1Score !== p2Score) {
-                if(player.inFinals) {
-                    if(won) {
-                        player.finalsGame++;
-                        if(player.finalsGame > 5) { alert(msg + "\n🏆 YOU WON THE NBA FINALS! 🏆"); player.careerWins = 0; player.inFinals = false; player.finalsGame = 1; } 
-                        else { alert(msg + `\nAdvancing to Finals Game ${player.finalsGame}!`); }
-                    } else { alert(msg + "\nEliminated in the Finals! Season Over."); player.careerWins = 0; player.inFinals = false; player.finalsGame = 1; }
+            let won = p1Score > p2Score;
+            let coinReward = won ? 100 : 30;
+            let xpReward = won ? 100 : 50;
+
+            player.coins += coinReward;
+            addXP(xpReward);
+
+            if (gameState.mode === 'career' && won) {
+                if (player.inFinals) {
+                    player.finalsGame++;
+                    if (player.finalsGame > 5) {
+                        alert("🏆 CHAMPION! You won the NBA Finals! 🏆\nReward: +500 Coins!");
+                        player.coins += 500;
+                        player.inFinals = false;
+                        player.careerWins = 0;
+                        player.finalsGame = 1;
+                    }
                 } else {
-                    if(won) { player.careerWins++;
-                        if(player.careerWins >= 5) { player.inFinals = true; player.finalsGame = 1; alert(msg + "\n🔥 CONGRATULATIONS! You reached the NBA Finals! 🔥"); } 
-                        else { alert(msg + `\nSeason Wins: ${player.careerWins} / 5`); }
-                    } else { alert(msg + "\nBrush it off, hit the court again."); }
+                    player.careerWins++;
+                    if (player.careerWins >= 5) {
+                        player.inFinals = true;
+                        alert("🎉 You made it to the NBA Finals! Get ready for a tough series!");
+                    }
                 }
-            } else { alert(msg); }
+            }
+
+            alert(`${won ? 'VICTORY!' : 'GAME OVER'}\nFinal Score: ${p1Score} - ${p2Score}\nRewards: +${coinReward} Coins, +${xpReward} XP`);
+            leaveLobby();
             nav('main-menu');
         }
     </script>
