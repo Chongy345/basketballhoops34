@@ -386,4 +386,377 @@
 
         function startMatch(mode) {
             gameState.mode = mode; document.getElementById('game-container').style.display = 'block'; nav('game-screen');
-            timeRemaining = 120; p1Score = 0; p2Score = 0
+            timeRemaining = 120; p1Score = 0; p2Score = 0; particles = []; updateScoreboard();
+
+            let aiLevel = 1;
+            if (mode === 'career') { aiLevel = player.inFinals ? (4 + player.finalsGame) : (1 + player.careerWins); } 
+            else { aiLevel = 2; }
+            
+            let aiSpeed = mode === 'multiplayer' ? 1.5 + (player.stats.speed * 0.2) : 1.0 + (aiLevel * 0.15); 
+            let aiJump = mode === 'multiplayer' ? -14 - (player.stats.jump * 0.5) : -11 - (aiLevel * 0.4);
+
+            p1 = { x: 250, y: 450, w: 50, h: 80, vx: 0, vy: 0, speed: 1.5 + (player.stats.speed * 0.2), jump: -14 - (player.stats.jump * 0.5), grounded: false, hasBall: true, color: '#4da6ff', isShooting: false, facing: 1 };
+            ai = { 
+                x: 650, y: 450, w: 50, h: 80, vx: 0, vy: 0, speed: aiSpeed, jump: aiJump, grounded: false, 
+                hasBall: false, color: '#ff4d4d', isShooting: false, facing: -1, level: aiLevel,
+                actionTimer: 0, currentAction: 'NORMAL', targetX: 650
+            };
+            ball = { x: 250, y: 450, r: 14, vx: 0, vy: 0, active: false, rot: 0 };
+
+            gameState.active = true;
+            gameState.resetTimer = 180;
+            gameState.ballToAI = false;
+            resetPositions(false);
+
+            clearInterval(timerInterval);
+            timerInterval = setInterval(() => {
+                if(!gameState.active || gameState.resetTimer > 0) return;
+                
+                if (mode !== 'multiplayer' || mp.isHost) {
+                    if (timeRemaining > 0) { timeRemaining--; updateScoreboard(); }
+                    if(p1DashCooldown > 0) p1DashCooldown--;
+                    if(p2DashCooldown > 0) p2DashCooldown--;
+                    
+                    if(timeRemaining <= 0 && !ball.active) { endGame(); }
+                }
+            }, 1000);
+            
+            requestAnimationFrame(update);
+        }
+
+        function updateScoreboard() {
+            let mins = Math.floor(Math.max(0, timeRemaining) / 60); let secs = Math.max(0, timeRemaining) % 60;
+            document.getElementById('time-display').innerText = `${mins}:${secs < 10 ? '0' : ''}${secs}`;
+            document.getElementById('score-p1').innerText = p1Score; document.getElementById('score-p2').innerText = p2Score;
+        }
+
+        function spawnText(text, x, y, color) { particles.push({ text: text, x: x, y: y, life: 60, color: color, vy: -2 }); }
+
+        function drawStickman(p) {
+            const time = Date.now() / 100;
+            const isRunning = Math.abs(p.vx) > 0.5 && p.grounded;
+            
+            let legSwing = isRunning ? Math.sin(time * p.speed) * 45 : 0;
+            if (!p.grounded) legSwing = -20; 
+            let armSwing = isRunning ? -Math.sin(time * p.speed) * 40 : 0;
+            
+            const headR = 14; const headY = p.y - p.h + headR; const neckY = headY + headR; const hipY = p.y - 25;
+            
+            ctx.strokeStyle = p.color; ctx.fillStyle = p.color; ctx.lineWidth = 6; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+
+            ctx.beginPath(); ctx.arc(p.x, headY, headR, 0, Math.PI * 2); ctx.fill();
+            ctx.beginPath(); ctx.moveTo(p.x, neckY); ctx.lineTo(p.x, hipY);
+
+            ctx.moveTo(p.x, hipY); ctx.lineTo(p.x + Math.sin(legSwing * Math.PI / 180) * 25, hipY + Math.cos(legSwing * Math.PI / 180) * 25);
+            ctx.moveTo(p.x, hipY); ctx.lineTo(p.x + Math.sin(-legSwing * Math.PI / 180) * 25, hipY + Math.cos(-legSwing * Math.PI / 180) * 25);
+
+            const shoulderY = neckY + 10;
+            if (p.isShooting) {
+                ctx.moveTo(p.x, shoulderY); ctx.lineTo(p.x + (20 * p.facing), shoulderY - 30);
+            } else if (p.hasBall) {
+                ctx.moveTo(p.x, shoulderY); ctx.lineTo(p.x + (15 * p.facing), shoulderY + 20);
+            } else {
+                ctx.moveTo(p.x, shoulderY); ctx.lineTo(p.x + Math.sin(armSwing * Math.PI / 180) * 20, shoulderY + Math.cos(armSwing * Math.PI / 180) * 20);
+                ctx.moveTo(p.x, shoulderY); ctx.lineTo(p.x + Math.sin(-armSwing * Math.PI / 180) * 20, shoulderY + Math.cos(-armSwing * Math.PI / 180) * 20);
+            }
+            ctx.stroke();
+        }
+
+        function update() {
+            if(!gameState.active) return;
+            
+            if (shakeFrames > 0) { canvas.style.transform = `translate(${Math.random()*10-5}px, ${Math.random()*10-5}px)`; shakeFrames--; } 
+            else { canvas.style.transform = `translate(0, 0)`; }
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            if(courtImg.complete && courtImg.naturalWidth !== 0) {
+                ctx.drawImage(courtImg, 0, 0, canvas.width, canvas.height);
+                ctx.fillStyle = 'rgba(0,0,0,0.4)'; ctx.fillRect(0,0, canvas.width, canvas.height);
+            } else {
+                ctx.fillStyle = '#222'; ctx.fillRect(0,0, canvas.width, canvas.height);
+                ctx.fillStyle = '#d4a373'; ctx.fillRect(0, 450, canvas.width, 100);
+            }
+
+            const floorY = 450; const gravity = 0.7; const friction = 0.85;
+
+            // Physics Update (Host or Single-Player)
+            if (gameState.mode !== 'multiplayer' || mp.isHost) {
+                p1.vy += gravity; p1.y += p1.vy; p1.x += p1.vx; p1.vx *= friction;
+                ai.vy += gravity; ai.y += ai.vy; ai.x += ai.vx; ai.vx *= friction;
+                
+                if(p1.y >= floorY) { p1.y = floorY; p1.vy = 0; p1.grounded = true; }
+                if(ai.y >= floorY) { ai.y = floorY; ai.vy = 0; ai.grounded = true; }
+                if(p1.x < 25) { p1.x = 25; p1.vx = 0; } if(p1.x > 875) { p1.x = 875; p1.vx = 0; }
+                if(ai.x < 25) { ai.x = 25; ai.vx = 0; } if(ai.x > 875) { ai.x = 875; ai.vx = 0; }
+
+                if (gameState.resetTimer > 0) {
+                    gameState.resetTimer--;
+                    if (gameState.resetTimer === 120) { resetPositions(gameState.ballToAI); }
+                    p1.facing = p1.hasBall ? 1 : (ball.x > p1.x ? 1 : -1);
+                    ai.facing = ai.hasBall ? -1 : (ball.x < ai.x ? -1 : 1);
+                } else {
+                    // P1 Inputs
+                    p1.facing = (ball.x > p1.x || p1.hasBall) ? 1 : -1;
+                    p1.isShooting = keys['ShiftLeft'] && p1.hasBall;
+
+                    if(keys['KeyD']) p1.vx += p1.speed;
+                    if(keys['KeyA']) p1.vx -= p1.speed;
+                    if(keys['Space'] && p1.grounded) { p1.vy = p1.jump; p1.grounded = false; }
+                    if(keys['KeyW'] && p1DashCooldown === 0) {
+                        p1.vx = keys['KeyA'] ? -25 : 25; p1DashCooldown = 3; keys['KeyW'] = false; spawnText("DASH!", p1.x, p1.y - 60, "white");
+                    }
+                    if(keys['KeyS'] && !p1.hasBall && ai.hasBall && Math.abs(p1.x - ai.x) < 70) {
+                        ai.hasBall = false; p1.hasBall = true; spawnText("STEAL!", p1.x, p1.y - 60, "yellow");
+                    }
+                    if(keys['KeyB'] && !p1.grounded && ball.active && ball.vy < 0 && Math.abs(p1.x - ball.x) < 70 && Math.abs(p1.y - ball.y) < 70) {
+                        ball.vx *= -1; ball.vy = 5; spawnText("BLOCKED!", p1.x, p1.y - 50, "red");
+                    }
+
+                    // P1 Shooting
+                    let meterUi = document.getElementById('shot-meter-container'); let fillUi = document.getElementById('shot-fill');
+                    if(keys['ShiftLeft'] && p1.hasBall) {
+                        isShooting = true; meterUi.style.display = 'block'; shotCharge += 3 * chargeDir;
+                        if(shotCharge > 100) { shotCharge = 100; chargeDir = -1; } if(shotCharge < 0) { shotCharge = 0; chargeDir = 1; }
+                        fillUi.style.width = shotCharge + '%';
+                    } else if (!keys['ShiftLeft'] && isShooting) {
+                        isShooting = false; meterUi.style.display = 'none'; p1.hasBall = false; ball.active = true;
+                        ball.x = p1.x + 20; ball.y = p1.y - 60;
+                        let now = Date.now();
+                        if(now - lastShiftPress < 300 && p1.x > 750 && !p1.grounded) {
+                            ball.vx = 4; ball.vy = 12; shakeFrames = 15; spawnText("SLAM DUNK!", p1.x, p1.y - 80, "orange");
+                        } else {
+                            let accuracy = 1 - (Math.abs(50 - shotCharge) / 50); 
+                            if(accuracy > 0.9) spawnText("GREEN!", p1.x, p1.y - 50, "lime");
+                            accuracy += (player.stats.accuracy * 0.08); 
+                            ball.vx = 10; ball.vy = -15 * Math.max(0.5, accuracy);
+                        }
+                        shotCharge = 0; lastShiftPress = now;
+                    }
+
+                    // MULTIPLAYER CLIENT INPUT HANDLING FOR PLAYER 2
+                    if (gameState.mode === 'multiplayer') {
+                        let k2 = mp.p2Keys;
+                        ai.facing = (ball.x < ai.x || ai.hasBall) ? -1 : 1;
+                        ai.isShooting = k2['ShiftLeft'] && ai.hasBall;
+
+                        if(k2['KeyD']) ai.vx += ai.speed;
+                        if(k2['KeyA']) ai.vx -= ai.speed;
+                        if(k2['Space'] && ai.grounded) { ai.vy = ai.jump; ai.grounded = false; }
+                        if(k2['KeyW'] && p2DashCooldown === 0) {
+                            ai.vx = k2['KeyA'] ? -25 : 25; p2DashCooldown = 3; k2['KeyW'] = false; spawnText("DASH!", ai.x, ai.y - 60, "white");
+                        }
+                        if(k2['KeyS'] && !ai.hasBall && p1.hasBall && Math.abs(ai.x - p1.x) < 70) {
+                            p1.hasBall = false; ai.hasBall = true; spawnText("STEAL!", ai.x, ai.y - 60, "yellow");
+                        }
+                        if(k2['KeyB'] && !ai.grounded && ball.active && ball.vy < 0 && Math.abs(ai.x - ball.x) < 70 && Math.abs(ai.y - ball.y) < 70) {
+                            ball.vx *= -1; ball.vy = 5; spawnText("BLOCKED!", ai.x, ai.y - 50, "red");
+                        }
+
+                        if(k2['ShiftLeft'] && ai.hasBall) {
+                            p2IsShooting = true; p2ShotCharge += 3 * p2ChargeDir;
+                            if(p2ShotCharge > 100) { p2ShotCharge = 100; p2ChargeDir = -1; } if(p2ShotCharge < 0) { p2ShotCharge = 0; p2ChargeDir = 1; }
+                        } else if (!k2['ShiftLeft'] && p2IsShooting) {
+                            p2IsShooting = false; ai.hasBall = false; ball.active = true;
+                            ball.x = ai.x - 20; ball.y = ai.y - 60;
+                            let now = Date.now();
+                            if(now - p2LastShiftPress < 300 && ai.x < 150 && !ai.grounded) {
+                                ball.vx = -4; ball.vy = 12; shakeFrames = 15; spawnText("SLAM DUNK!", ai.x, ai.y - 80, "orange");
+                            } else {
+                                let accuracy = 1 - (Math.abs(50 - p2ShotCharge) / 50); 
+                                ball.vx = -10; ball.vy = -15 * Math.max(0.5, accuracy);
+                            }
+                            p2ShotCharge = 0; p2LastShiftPress = now;
+                        }
+                    } else {
+                        // UNPREDICTABLE AI DECISION ENGINE
+                        if (ai.actionTimer <= 0) {
+                            ai.actionTimer = Math.floor(Math.random() * 30) + 20; 
+                            if (ai.hasBall) {
+                                let roll = Math.random();
+                                if (roll < 0.40) { ai.currentAction = 'DRIVE'; ai.targetX = 100 + Math.random() * 150; } 
+                                else if (roll < 0.70) { ai.currentAction = 'PULLUP'; ai.targetX = 220 + Math.random() * 200; } 
+                                else if (roll < 0.85) { ai.currentAction = 'STEPBACK'; ai.targetX = Math.min(800, ai.x + (60 + Math.random() * 40)); } 
+                                else { ai.currentAction = 'HESITATE'; }
+                            } else if (p1.hasBall) {
+                                let roll = Math.random();
+                                if (roll < 0.35) { ai.currentAction = 'PRESS'; } 
+                                else if (roll < 0.65) { ai.currentAction = 'SAG'; } 
+                                else if (roll < 0.80) { ai.currentAction = 'CONTEST'; } 
+                                else { ai.currentAction = 'MIRROR'; }
+                            } else { ai.currentAction = 'CHASE_BALL'; }
+                        } else { ai.actionTimer--; }
+
+                        if (ai.hasBall) {
+                            if (ai.currentAction === 'DRIVE') {
+                                if (ai.x > ai.targetX) ai.vx -= ai.speed * 0.8;
+                                if (ai.x < 220 && ai.grounded) {
+                                    if (Math.random() < 0.65) ai.vy = ai.jump; 
+                                    ai.hasBall = false; ball.active = true; ai.isShooting = true;
+                                    ball.x = ai.x - 20; ball.y = ai.y - 60; ball.vx = -4 - (Math.random() * 3); ball.vy = -10 - (Math.random() * 4);
+                                    setTimeout(() => ai.isShooting = false, 400);
+                                }
+                            } else if (ai.currentAction === 'PULLUP') {
+                                if (Math.abs(ai.x - ai.targetX) > 20) { ai.vx += (ai.targetX < ai.x ? -1 : 1) * ai.speed * 0.7; } 
+                                else if (ai.grounded) {
+                                    if (Math.random() < 0.5) ai.vy = ai.jump;
+                                    ai.hasBall = false; ball.active = true; ai.isShooting = true;
+                                    ball.x = ai.x - 20; ball.y = ai.y - 60; ball.vx = -8 - (Math.random() * 2.5); ball.vy = -13 - (Math.random() * 3);
+                                    setTimeout(() => ai.isShooting = false, 500);
+                                }
+                            } else if (ai.currentAction === 'STEPBACK') {
+                                if (ai.x < ai.targetX) { ai.vx += ai.speed * 1.1; } else { ai.currentAction = 'PULLUP'; }
+                            } else if (ai.currentAction === 'HESITATE') { ai.vx *= 0.3; }
+                        } else if (p1.hasBall) {
+                            if (ai.currentAction === 'PRESS') {
+                                let targetPos = p1.x + 50;
+                                if (ai.x > targetPos) ai.vx -= ai.speed * 0.8; else if (ai.x < targetPos - 20) ai.vx += ai.speed * 0.8;
+                                if (Math.abs(ai.x - p1.x) < 65 && Math.random() < (0.015 * ai.level)) { p1.hasBall = false; ai.hasBall = true; spawnText("AI STEAL!", ai.x, ai.y - 60, "#ff4d4d"); }
+                            } else if (ai.currentAction === 'SAG') {
+                                let rimGuardX = 250 + (p1.x * 0.4);
+                                if (ai.x > rimGuardX) ai.vx -= ai.speed * 0.6; else if (ai.x < rimGuardX) ai.vx += ai.speed * 0.6;
+                            } else if (ai.currentAction === 'CONTEST') {
+                                if (ai.grounded && Math.abs(ai.x - p1.x) < 110) { ai.vy = ai.jump; spawnText("CONTEST!", ai.x, ai.y - 50, "orange"); }
+                                ai.currentAction = 'PRESS';
+                            } else if (ai.currentAction === 'MIRROR') {
+                                let idealDist = p1.x + 100;
+                                if (ai.x > idealDist + 20) ai.vx -= ai.speed * 0.5; else if (ai.x < idealDist - 20) ai.vx += ai.speed * 0.5;
+                            }
+                        } else if (ball.active) {
+                            if (ai.x < ball.x - 15) ai.vx += ai.speed * 0.7;
+                            if (ai.x > ball.x + 15) ai.vx -= ai.speed * 0.7;
+                            if (ball.y < ai.y - 60 && ai.grounded && Math.abs(ai.x - ball.x) < 60) {
+                                if (Math.random() < 0.08 * ai.level) ai.vy = ai.jump;
+                            }
+                        }
+                    }
+                }
+
+                // Ball Physics & Scoring Detect
+                if(p1.hasBall) {
+                    ball.x = p1.x + (p1.facing * 20); ball.y = p1.y + (Math.abs(Math.cos(Date.now() / 150)) * 25) - 10; ball.rot += 0.1;
+                } else if (ai.hasBall) {
+                    ball.x = ai.x + (ai.facing * 20); ball.y = ai.y + (Math.abs(Math.cos(Date.now() / 150)) * 25) - 10; ball.rot -= 0.1;
+                } else if (ball.active) {
+                    ball.vy += gravity; ball.x += ball.vx; ball.y += ball.vy; ball.rot += ball.vx * 0.05;
+
+                    if(ball.x - ball.r < 0) { ball.x = ball.r; ball.vx *= -0.8; }
+                    if(ball.x + ball.r > canvas.width) { ball.x = canvas.width - ball.r; ball.vx *= -0.8; }
+                    if(ball.y >= floorY + 15) { ball.y = floorY + 15; ball.vy *= -0.7; ball.vx *= 0.8; }
+                    
+                    if(ball.y > floorY - 50 && ball.vy > 0 && gameState.resetTimer <= 0) {
+                        if(Math.abs(p1.x - ball.x) < 50) { p1.hasBall = true; ball.active = false; }
+                        else if(Math.abs(ai.x - ball.x) < 50) { ai.hasBall = true; ball.active = false; }
+                    }
+
+                    if (gameState.resetTimer <= 0) {
+                        if(ball.x > 820 && ball.x < 880 && ball.y > 240 && ball.y < 280 && ball.vy > 0) { scorePoints('p1', p1.x < 450 ? 3 : 2); }
+                        if(ball.x > 20 && ball.x < 80 && ball.y > 240 && ball.y < 280 && ball.vy > 0) { scorePoints('ai', ai.x > 450 ? 3 : 2); }
+                    }
+                }
+
+                // SYNC GAME STATE TO CLIENT
+                if (gameState.mode === 'multiplayer' && mp.channel) {
+                    mp.channel.send({
+                        type: 'broadcast',
+                        event: 'sync',
+                        payload: {
+                            p1: { x: p1.x, y: p1.y, vx: p1.vx, vy: p1.vy, facing: p1.facing, hasBall: p1.hasBall },
+                            p2: { x: ai.x, y: ai.y, vx: ai.vx, vy: ai.vy, facing: ai.facing, hasBall: ai.hasBall },
+                            ball: { x: ball.x, y: ball.y, rot: ball.rot, active: ball.active },
+                            p1Score, p2Score, timeRemaining, resetTimer: gameState.resetTimer
+                        }
+                    });
+                }
+            }
+
+            // Draw Court Elements
+            ctx.strokeStyle = 'rgba(255,255,255,0.5)'; ctx.lineWidth = 3;
+            ctx.beginPath(); ctx.moveTo(450, 0); ctx.lineTo(450, 550); ctx.stroke();
+            ctx.beginPath(); ctx.arc(450, 450, 200, 0, Math.PI, true); ctx.stroke();
+
+            ctx.fillStyle = 'rgba(255,255,255,0.2)'; ctx.fillRect(10, 180, 10, 100); ctx.fillRect(880, 180, 10, 100); 
+            ctx.fillStyle = '#ff5500'; ctx.fillRect(20, 250, 60, 8); ctx.fillRect(820, 250, 60, 8); 
+
+            // Draw Players & Ball
+            drawStickman(p1);
+            drawStickman(ai);
+
+            ctx.save();
+            ctx.translate(ball.x, ball.y); ctx.rotate(ball.rot);
+            ctx.fillStyle = '#ff7b00';
+            ctx.beginPath(); ctx.arc(0, 0, ball.r, 0, Math.PI * 2); ctx.fill();
+            ctx.strokeStyle = '#000'; ctx.lineWidth = 1.5;
+            ctx.beginPath(); ctx.moveTo(-ball.r, 0); ctx.lineTo(ball.r, 0); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(0, -ball.r); ctx.lineTo(0, ball.r); ctx.stroke();
+            ctx.restore();
+
+            if (gameState.resetTimer > 0 && gameState.resetTimer <= 120) {
+                let count = Math.ceil(gameState.resetTimer / 60);
+                if (count > 0) {
+                    ctx.fillStyle = "rgba(0,0,0,0.4)"; ctx.fillRect(0,0,canvas.width,canvas.height);
+                    ctx.fillStyle = "var(--gold)"; ctx.font = "bold 120px Arial"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+                    ctx.fillText(count, canvas.width/2, canvas.height/2);
+                    ctx.strokeStyle = "white"; ctx.lineWidth = 4; ctx.strokeText(count, canvas.width/2, canvas.height/2);
+                    ctx.textBaseline = "alphabetic";
+                }
+            }
+
+            for(let i = particles.length - 1; i >= 0; i--) {
+                let p = particles[i]; ctx.fillStyle = p.color; ctx.font = "bold 24px Arial"; ctx.textAlign = "center";
+                ctx.globalAlpha = p.life / 60; ctx.fillText(p.text, p.x, p.y); p.y += p.vy; p.life--;
+                if(p.life <= 0) particles.splice(i, 1);
+            }
+            ctx.globalAlpha = 1.0;
+
+            requestAnimationFrame(update);
+        }
+
+        function scorePoints(team, pts) {
+            let isBuzzer = timeRemaining <= 0;
+            if(isBuzzer) { pts = 5; spawnText("BUZZER BEATER! +5", 450, 200, "gold"); shakeFrames = 20; }
+            else { spawnText(`SWISH! +${pts}`, team === 'p1' ? 850 : 50, 200, "white"); }
+            
+            if(team === 'p1') p1Score += pts; else p2Score += pts; 
+            updateScoreboard();
+
+            gameState.resetTimer = 180; 
+            gameState.ballToAI = (team === 'p1'); 
+        }
+
+        function resetPositions(giveBallToAI) { 
+            p1.x = 250; p1.y = 450; p1.vx = 0; p1.isShooting = false; p1.hasBall = !giveBallToAI;
+            ai.x = 650; ai.y = 450; ai.vx = 0; ai.isShooting = false; ai.hasBall = giveBallToAI;
+            ball.active = false; shotCharge = 0; isShooting = false; p2ShotCharge = 0; p2IsShooting = false;
+            document.getElementById('shot-meter-container').style.display = 'none';
+        }
+
+        function endGame() {
+            gameState.active = false; clearInterval(timerInterval);
+            document.getElementById('game-container').style.display = 'none'; document.getElementById('shot-meter-container').style.display = 'none';
+            let won = p1Score > p2Score; let msg = won ? `VICTORY! ${p1Score} - ${p2Score}` : `DEFEAT! ${p1Score} - ${p2Score}`;
+            
+            if (p1Score === p2Score) { msg = `TIE GAME! ${p1Score} - ${p2Score}`; player.coins += 5; addXP(75); }
+            else if(won) { player.coins += 10; addXP(100); } 
+            else { player.coins += 5; addXP(50); }
+
+            if(gameState.mode === 'career' && p1Score !== p2Score) {
+                if(player.inFinals) {
+                    if(won) {
+                        player.finalsGame++;
+                        if(player.finalsGame > 5) { alert(msg + "\n🏆 YOU WON THE NBA FINALS! 🏆"); player.careerWins = 0; player.inFinals = false; player.finalsGame = 1; } 
+                        else { alert(msg + `\nAdvancing to Finals Game ${player.finalsGame}!`); }
+                    } else { alert(msg + "\nEliminated in the Finals! Season Over."); player.careerWins = 0; player.inFinals = false; player.finalsGame = 1; }
+                } else {
+                    if(won) { player.careerWins++;
+                        if(player.careerWins >= 5) { player.inFinals = true; player.finalsGame = 1; alert(msg + "\n🔥 CONGRATULATIONS! You reached the NBA Finals! 🔥"); } 
+                        else { alert(msg + `\nSeason Wins: ${player.careerWins} / 5`); }
+                    } else { alert(msg + "\nBrush it off, hit the court again."); }
+                }
+            } else { alert(msg); }
+
+            if (mp.channel && supabaseClient) { supabaseClient.removeChannel(mp.channel); mp.channel = null; }
+            nav('main-menu');
+        }
+    </script>
+</body>
+</html>
